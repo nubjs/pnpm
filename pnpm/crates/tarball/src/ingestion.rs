@@ -8,6 +8,7 @@ use crate::{
 };
 use pnpm_network::{AuthHeaders, RetryOpts, ThrottledClient};
 use pnpm_reporter::Reporter;
+use pnpm_store_dir::SharedExtractObserver;
 use pnpm_store_dir::{
     PackageFilesIndex, SharedReadonlyStoreIndex, SharedVerifiedFilesCache, StoreDir,
     StoreIndexWriter,
@@ -45,6 +46,7 @@ pub(crate) struct ArchiveIngestion<'a> {
     pub(crate) retry_opts: RetryOpts,
     pub(crate) auth_headers: &'a AuthHeaders,
     pub(crate) ignore_file_pattern: &'a Option<Arc<IgnoreEntryFilter>>,
+    pub(crate) extract_observer: &'a SharedExtractObserver,
     pub(crate) offline: bool,
     pub(crate) progress_reported: &'a Option<SharedReportedProgressKeys>,
     pub(crate) store_projection: ArchiveStoreProjection<'a>,
@@ -200,6 +202,7 @@ impl ArchiveIngestion<'_> {
                     self.retry_opts,
                     self.auth_headers,
                     self.ignore_file_pattern.clone(),
+                    self.extract_observer.clone(),
                     progress_key,
                     revision_addressed,
                 )

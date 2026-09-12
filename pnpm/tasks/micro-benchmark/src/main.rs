@@ -119,6 +119,7 @@ async fn ingest_benchmark_package(
 ) -> Result<std::collections::HashMap<String, std::path::PathBuf>, pnpm_tarball::TarballError> {
     let auth_headers = AuthHeaders::default();
     IngestTarballToStore {
+        extract_observer: None,
         http_client,
         store_dir,
         store_index: None,

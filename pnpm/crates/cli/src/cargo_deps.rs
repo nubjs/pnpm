@@ -1424,6 +1424,9 @@ async fn ingest_crate<Reporter: self::Reporter + 'static>(
         .into_diagnostic()
         .wrap_err_with(|| format!("decode checksum for {package_id}"))?;
     let cas_paths = IngestTarballToStore {
+        // A cargo dependency is tooling the CLI fetches for itself, not a
+        // package the project installs.
+        extract_observer: None,
         http_client: &options.http_client,
         store_dir: options.store_dir,
         store_index: options.store_index.as_ref().map(Arc::clone),

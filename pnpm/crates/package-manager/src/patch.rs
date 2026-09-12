@@ -279,6 +279,7 @@ impl WritePackageForPatch<'_> {
         IngestTarballToStore {
             http_client: self.http_client,
             store_dir: &self.config.store_dir,
+            extract_observer: self.config.extract_observer.clone(),
             store_index,
             store_index_writer: Some(Arc::clone(store_index_writer)),
             verify_store_integrity: self.config.verify_store_integrity,

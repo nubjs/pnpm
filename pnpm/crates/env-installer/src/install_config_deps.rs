@@ -232,6 +232,10 @@ async fn materialize<Reporter: self::Reporter>(
     let cas_paths = IngestTarballToStore {
         http_client: opts.http_client,
         store_dir: opts.store_dir,
+        // A config dependency is the tool's own, not the project's: it never
+        // reaches the project's `node_modules`, so a host observing the
+        // packages it installs must not be told about these.
+        extract_observer: None,
         store_index: None,
         store_index_writer: None,
         verify_store_integrity: opts.verify_store_integrity,

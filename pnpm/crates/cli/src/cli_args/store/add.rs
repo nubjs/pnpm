@@ -182,6 +182,9 @@ async fn add_one<Reporter: self::Reporter>(args: AddOne<'_>) -> miette::Result<S
     };
 
     IngestTarballToStore {
+        // `store add` fills the store directly; there is no install whose
+        // host would be observing it.
+        extract_observer: None,
         http_client: args.http_client,
         store_dir: &args.config.store_dir,
         store_index: args.store_index,

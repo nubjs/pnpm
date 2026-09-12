@@ -311,6 +311,7 @@ impl ResolverChainInputs<'_> {
             source_cache: Arc::clone(self.git_source_cache),
             http_client: Arc::clone(self.http_client_arc),
             store_dir: self.store_dir,
+            extract_observer: self.config.extract_observer.clone(),
             store_index_writer: Some(Arc::clone(self.store_index_writer)),
             auth_headers: Arc::clone(self.auth_headers),
             retry_opts: self.retry_opts(),
@@ -331,6 +332,7 @@ impl ResolverChainInputs<'_> {
             http_client: Arc::clone(self.http_client_arc),
             fetch_context: Some(TarballFetchContext {
                 store_dir: self.store_dir,
+                extract_observer: self.config.extract_observer.clone(),
                 store_index_writer: Some(Arc::clone(self.store_index_writer)),
                 mem_cache: Some(Arc::clone(self.tarball_mem_cache)),
                 auth_headers: Arc::clone(self.auth_headers),

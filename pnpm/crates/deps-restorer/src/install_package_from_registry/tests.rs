@@ -31,6 +31,8 @@ fn create_config(
     cache_dir: &Path,
 ) -> Config {
     Config {
+        embedder: Default::default(),
+        extract_observer: None,
         bail: true,
         ci: false,
         update_notifier: true,

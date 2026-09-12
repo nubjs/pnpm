@@ -20,6 +20,7 @@ use pnpm_reporter::{
     FetchingProgressLog, FetchingProgressMessage, LogEvent, LogLevel, ProgressLog, ProgressMessage,
     Reporter, RequestRetryError,
 };
+use pnpm_store_dir::SharedExtractObserver;
 use pnpm_store_dir::{
     PackageFilesIndex, SharedReadonlyStoreIndex, SharedVerifiedFilesCache, StoreDir,
     StoreIndexWriter, store_index_key,
@@ -238,6 +239,10 @@ pub struct IngestTarballToStore<'a> {
     /// Arc per retry attempt is cheap; the inner trait object
     /// is shared.
     pub ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    /// Notified once per package this install extracts into the store.
+    /// `None` for pnpm itself; an embedding host registers one to
+    /// observe package contents at the point they land on disk.
+    pub extract_observer: SharedExtractObserver,
     /// `offline` from `Config`. When `true` and both the warm
     /// prefetch (`prefetched_cas_paths`) and the `SQLite` `index.db`
     /// lookup (`load_cached_cas_paths`) miss, the fetcher fails fast
@@ -349,6 +354,7 @@ pub(crate) async fn extract_tarball_buffer(
     package_url: &str,
     store_dir: &'static StoreDir,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
 ) -> Result<(Integrity, HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     let post_download_permit = post_download_semaphore()
         .acquire()
@@ -372,6 +378,7 @@ pub(crate) async fn extract_tarball_buffer(
                 package_unpacked_size,
                 store_dir,
                 ignore_file_pattern.as_deref(),
+                extract_observer.as_deref(),
             )?;
             Ok((integrity, cas_paths, pkg_files_idx))
         },
@@ -481,6 +488,7 @@ async fn extract_body_while_downloading<Reporter, Body, Guard>(
     package_url: &str,
     store_dir: &'static StoreDir,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
 ) -> Result<(Integrity, HashMap<String, PathBuf>, PackageFilesIndex), TarballError>
 where
     Reporter: self::Reporter,
@@ -488,8 +496,14 @@ where
 {
     let (chunk_tx, chunk_rx) = body_chunk_channel();
     let extractor_ignore = ignore_file_pattern.clone();
+    let extractor_observer = extract_observer.clone();
     let extract_task = spawn_extraction(streaming_permit, move || {
-        stream_extract_gzipped_channel(chunk_rx, store_dir, extractor_ignore.as_deref())
+        stream_extract_gzipped_channel(
+            chunk_rx,
+            store_dir,
+            extractor_ignore.as_deref(),
+            extractor_observer.as_deref(),
+        )
     });
 
     let mut feed = ExtractorFeed { chunk_tx, open: true };
@@ -711,6 +725,7 @@ pub(crate) async fn fetch_and_extract_once<Reporter: self::Reporter>(
     store_dir: &'static StoreDir,
     auth_headers: &AuthHeaders,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
     revision_addressed: bool,
 ) -> Result<(Integrity, HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     let download = TarballDownload {
@@ -721,6 +736,7 @@ pub(crate) async fn fetch_and_extract_once<Reporter: self::Reporter>(
         package_id,
         store_dir,
         ignore_file_pattern,
+        extract_observer,
     };
     if let Some(path) = local_file_tarball_path(package_url) {
         return download.fetch_local::<Reporter>(&path, attempt).await;
@@ -746,6 +762,7 @@ struct TarballDownload<'a> {
     package_id: &'a str,
     store_dir: &'static StoreDir,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
 }
 
 impl TarballDownload<'_> {
@@ -763,6 +780,7 @@ impl TarballDownload<'_> {
             attempt,
             self.store_dir,
             self.ignore_file_pattern,
+            self.extract_observer,
         )
         .await
     }
@@ -844,6 +862,7 @@ impl TarballDownload<'_> {
             self.package_url,
             self.store_dir,
             self.ignore_file_pattern,
+            self.extract_observer,
         )
         .await
     }
@@ -871,6 +890,7 @@ impl TarballDownload<'_> {
             self.package_url,
             self.store_dir,
             self.ignore_file_pattern,
+            self.extract_observer,
         )
         .await
     }
@@ -891,6 +911,7 @@ async fn fetch_local_tarball<Reporter: self::Reporter>(
     attempt: u32,
     store_dir: &'static StoreDir,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
 ) -> Result<(Integrity, HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     let (file, size) = open_local_tarball(path).await?;
     Reporter::emit(&LogEvent::FetchingProgress(FetchingProgressLog {
@@ -909,6 +930,7 @@ async fn fetch_local_tarball<Reporter: self::Reporter>(
         package_url,
         store_dir,
         ignore_file_pattern,
+        extract_observer,
     )
     .await
 }
@@ -1159,6 +1181,7 @@ pub(crate) async fn fetch_and_extract_with_retry<Reporter: self::Reporter>(
     retry_opts: RetryOpts,
     auth_headers: &AuthHeaders,
     ignore_file_pattern: Option<Arc<IgnoreEntryFilter>>,
+    extract_observer: SharedExtractObserver,
     progress_key: Option<(&SharedReportedProgressKeys, &str)>,
     revision_addressed: bool,
 ) -> Result<(Integrity, HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
@@ -1183,6 +1206,7 @@ pub(crate) async fn fetch_and_extract_with_retry<Reporter: self::Reporter>(
                 store_dir,
                 auth_headers,
                 ignore_file_pattern.clone(),
+                extract_observer.clone(),
                 revision_addressed,
             )
         },

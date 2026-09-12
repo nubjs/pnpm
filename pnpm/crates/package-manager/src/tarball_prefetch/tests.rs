@@ -77,6 +77,7 @@ fn revision_download(
     integrity: ssri::Integrity,
 ) -> TarballDownload {
     TarballDownload {
+        extract_observer: None,
         http_client: Arc::new(ThrottledClient::default()),
         mem_cache: Arc::new(MemCache::new()),
         store_dir,

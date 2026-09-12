@@ -73,6 +73,8 @@ pub(crate) struct TarballDownload {
     pub http_client: Arc<ThrottledClient>,
     pub mem_cache: Arc<MemCache>,
     pub store_dir: &'static StoreDir,
+    /// Notified once per package this prefetch extracts into the store.
+    pub extract_observer: pnpm_store_dir::SharedExtractObserver,
     pub store_index: Option<SharedReadonlyStoreIndex>,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
     pub verified_files_cache: SharedVerifiedFilesCache,
@@ -110,6 +112,7 @@ async fn run_tarball_download(
     let ingest = IngestTarballToStore {
         http_client: &download.http_client,
         store_dir: download.store_dir,
+        extract_observer: download.extract_observer.clone(),
         store_index: download.store_index,
         store_index_writer: download.store_index_writer,
         verify_store_integrity: download.verify_store_integrity,
@@ -155,6 +158,8 @@ async fn run_tarball_download(
 /// how `PrefetchingResolver` shares the install's writer.
 #[must_use]
 pub struct TarballPrefetcher {
+    /// Notified once per package a prefetch extracts into the store.
+    pub extract_observer: pnpm_store_dir::SharedExtractObserver,
     http_client: Arc<ThrottledClient>,
     mem_cache: Arc<MemCache>,
     store_dir: &'static StoreDir,
@@ -211,6 +216,7 @@ impl TarballPrefetcher {
             http_client: Arc::clone(http_client),
             mem_cache: Arc::clone(mem_cache),
             store_dir,
+            extract_observer: config.extract_observer.clone(),
             store_index,
             store_index_writer,
             writer_task,
@@ -257,6 +263,7 @@ impl TarballPrefetcher {
             return;
         }
         spawn_tarball_download(TarballDownload {
+            extract_observer: self.extract_observer.clone(),
             http_client: Arc::clone(&self.http_client),
             mem_cache: Arc::clone(&self.mem_cache),
             store_dir: self.store_dir,

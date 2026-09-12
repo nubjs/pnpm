@@ -284,6 +284,7 @@ fn tempdir_with_leaked_path() -> (TempDir, &'static StoreDir) {
 async fn packages_under_orgs_should_work() {
     let (store_dir, store_path) = tempdir_with_leaked_path();
     let cas_files = IngestTarballToStore {
+        extract_observer: None,
         http_client: &ThrottledClient::default(),
         store_dir: store_path,
         store_index: None,
@@ -350,6 +351,7 @@ async fn network_fetch_records_progress_key() {
     let progress_reported = SharedReportedProgressKeys::default();
 
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &ThrottledClient::default(),
         store_dir: store_path,
         store_index: None,
@@ -388,6 +390,7 @@ async fn network_fetch_records_progress_key() {
 async fn should_throw_error_on_checksum_mismatch() {
     let (store_dir, store_path) = tempdir_with_leaked_path();
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &ThrottledClient::default(),
         store_dir: store_path,
         store_index: None,
@@ -471,6 +474,7 @@ async fn reuses_cached_cas_paths_when_index_entry_is_live() {
     // package status again.
     let progress_reported = SharedReportedProgressKeys::default();
     let download = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -546,6 +550,7 @@ async fn reuses_prefetched_cas_paths_when_provided() {
     let (_keep, store_path) = tempdir_with_leaked_path();
 
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         // No SQLite handle: any fall-through to the per-snapshot
@@ -908,6 +913,7 @@ async fn falls_through_when_cafs_file_missing() {
     drop(index);
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -979,6 +985,7 @@ async fn store_row_holding_another_package_fails_the_read() {
     seed_row_holding_another_package(store_path, &index_key);
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -1040,6 +1047,7 @@ async fn store_row_holding_another_package_only_warns_when_not_strict() {
 
     EVENTS.lock().unwrap().clear();
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -1120,6 +1128,7 @@ async fn falls_through_when_digest_is_malformed() {
     drop(index);
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -1190,6 +1199,7 @@ async fn falls_through_when_cafs_path_is_a_directory() {
     drop(index);
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -1270,6 +1280,7 @@ async fn falls_through_when_cafs_path_is_a_symlink() {
     drop(index);
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -1322,7 +1333,7 @@ fn extract_propagates_malformed_tar_instead_of_panicking() {
     // way the filter+map_err plumbing must surface the failure as
     // `TarballError::ReadTarballEntries`.
     let bogus: Vec<u8> = vec![0xFF; 1024];
-    let err = extract_tarball_entries(&bogus, store_path, None)
+    let err = extract_tarball_entries(&bogus, store_path, None, None)
         .expect_err("malformed tar must surface a TarballError, not panic");
 
     assert!(
@@ -1372,7 +1383,7 @@ fn extract_rejects_parent_dir_component_in_entry_path() {
         builder.finish().expect("finalize tar");
     }
 
-    let err = extract_tarball_entries(&tar_bytes, store_path, None)
+    let err = extract_tarball_entries(&tar_bytes, store_path, None, None)
         .expect_err("parent-dir component must be rejected, not normalized");
 
     match err {
@@ -1420,7 +1431,7 @@ fn extract_tarball_applies_ignore_filter_dropping_entries_from_both_maps() {
     }
 
     let (cas_paths, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, Some(&drop_npm))
+        extract_tarball_entries(&tar_bytes, store_path, Some(&drop_npm), None)
             .expect("tarball extraction with ignore filter");
 
     dbg!(&cas_paths);
@@ -1463,7 +1474,7 @@ fn extract_tarball_records_requires_build_from_manifest() {
     }
 
     let (_cas_paths, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("tarball extraction");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("tarball extraction");
 
     assert_eq!(pkg_files_idx.requires_build, Some(true));
     drop(tempdir);
@@ -1492,7 +1503,7 @@ fn extract_tarball_reads_a_manifest_that_starts_with_a_utf8_bom() {
     }
 
     let (_cas_paths, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("tarball extraction");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("tarball extraction");
 
     assert_eq!(pkg_files_idx.requires_build, Some(true));
     assert!(pkg_files_idx.manifest.is_some(), "the bundled manifest must be recorded");
@@ -1597,7 +1608,7 @@ fn extract_gzipped_tarball_streams_an_archive_past_the_eager_ceiling() {
         "the fixture must look small enough to route to the eager path",
     );
 
-    let (cas_paths, pkg_files_idx) = extract_gzipped_tarball(&bomb, None, store_path, None)
+    let (cas_paths, pkg_files_idx) = extract_gzipped_tarball(&bomb, None, store_path, None, None)
         .expect("an archive past the eager ceiling must still extract");
 
     dbg!(cas_paths.keys().collect::<Vec<_>>());
@@ -1683,11 +1694,11 @@ fn streaming_extract_matches_eager_extract() {
 
     let (eager_tempdir, eager_store) = tempdir_with_leaked_path();
     let (eager_cas_paths, eager_idx) =
-        extract_tarball_entries(&tar_bytes, eager_store, None).expect("eager extraction");
+        extract_tarball_entries(&tar_bytes, eager_store, None, None).expect("eager extraction");
 
     let (streaming_tempdir, streaming_store) = tempdir_with_leaked_path();
     let (streaming_cas_paths, streaming_idx) =
-        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), streaming_store, None)
+        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), streaming_store, None, None)
             .expect("streaming extraction");
 
     let relative =
@@ -1761,7 +1772,7 @@ fn streaming_extract_rejects_parent_dir_component_in_entry_path() {
         builder.finish().expect("finalize tar");
     }
 
-    let err = stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None)
+    let err = stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None, None)
         .expect_err("parent-dir component must be rejected, not normalized");
 
     match err {
@@ -1803,7 +1814,7 @@ fn streaming_extract_applies_ignore_filter_dropping_entries_from_both_maps() {
     }
 
     let (cas_paths, pkg_files_idx) =
-        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, Some(&drop_npm))
+        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, Some(&drop_npm), None)
             .expect("streaming extraction with ignore filter");
 
     dbg!(&cas_paths);
@@ -1843,7 +1854,7 @@ fn streaming_extract_parses_manifest_larger_than_entry_buffer() {
     }
 
     let (_cas_paths, pkg_files_idx) =
-        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None)
+        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None, None)
             .expect("streaming extraction");
 
     assert_eq!(pkg_files_idx.requires_build, Some(true));
@@ -1868,8 +1879,9 @@ fn streaming_extract_rejects_manifest_beyond_prealloc_cap() {
     header.set_entry_type(tar::EntryType::Regular);
     header.set_cksum();
 
-    let err = stream_extract_gzipped_tarball(&gzip_bytes(header.as_bytes()), store_path, None)
-        .expect_err("oversized manifest must be rejected, not buffered");
+    let err =
+        stream_extract_gzipped_tarball(&gzip_bytes(header.as_bytes()), store_path, None, None)
+            .expect_err("oversized manifest must be rejected, not buffered");
 
     match err {
         TarballError::ReadTarballEntries(io_err) => {
@@ -1900,7 +1912,7 @@ fn streaming_extract_truncated_large_entry_commits_nothing() {
     // Only 1 KiB of the claimed payload is present.
     tar_bytes.extend_from_slice(&[0u8; 1024]);
 
-    let err = stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None)
+    let err = stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None, None)
         .expect_err("truncated large entry must fail extraction");
     assert!(
         matches!(err, TarballError::ReadTarballEntries(_)),
@@ -1939,7 +1951,7 @@ fn streaming_extract_propagates_corrupt_gzip_as_read_error() {
     let (tempdir, store_path) = tempdir_with_leaked_path();
 
     let bogus: Vec<u8> = vec![0xFF; 1024];
-    let err = stream_extract_gzipped_tarball(&bogus, store_path, None)
+    let err = stream_extract_gzipped_tarball(&bogus, store_path, None, None)
         .expect_err("corrupt gzip must surface a TarballError, not panic");
 
     assert!(
@@ -1989,6 +2001,7 @@ async fn download_pipeline_extracts_via_streaming_path_for_large_unpacked_hint()
             store_path,
             fast_retry_opts(),
             &AuthHeaders::default(),
+            None,
             None,
             None,
             false,
@@ -2337,6 +2350,7 @@ async fn mem_cache_partitions_raw_and_package_projections_in_both_orders() {
         let (store_dir, store_path) = tempdir_with_leaked_path();
         let mem_cache = MemCache::default();
         let ingest = |store_projection| IngestTarballToStore {
+            extract_observer: None,
             http_client: &client,
             store_dir: store_path,
             store_index: None,
@@ -2403,6 +2417,7 @@ async fn mem_cache_partitions_synthesized_package_manifests_by_content() {
     let auth_headers = AuthHeaders::default();
     let mem_cache = MemCache::default();
     let ingest = |append_manifest| IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -2460,6 +2475,7 @@ async fn store_index_partitions_synthesized_package_manifests_by_content() {
     for manifest in [first_manifest.as_slice(), second_manifest.as_slice()] {
         let (writer, writer_task) = StoreIndexWriter::spawn(store_path);
         IngestTarballToStore {
+            extract_observer: None,
             http_client: &client,
             store_dir: store_path,
             store_index: StoreIndex::shared_readonly_in(store_path),
@@ -2492,6 +2508,7 @@ async fn store_index_partitions_synthesized_package_manifests_by_content() {
     let store_index = StoreIndex::shared_readonly_in(store_path);
     for manifest in [first_manifest.as_slice(), second_manifest.as_slice()] {
         let files = IngestTarballToStore {
+            extract_observer: None,
             http_client: &client,
             store_dir: store_path,
             store_index: store_index.clone(),
@@ -2576,6 +2593,7 @@ async fn synthesized_projection_reuses_only_a_matching_legacy_row_offline() {
     let auth_headers = AuthHeaders::default();
     let store_index = StoreIndex::shared_readonly_in(store_path);
     let ingest = |append_manifest| IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: store_index.clone(),
@@ -2624,6 +2642,7 @@ async fn raw_archive_projection_does_not_inject_an_npm_manifest() {
     let (store_dir, store_path) = tempdir_with_leaked_path();
 
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: None,
@@ -2691,6 +2710,7 @@ async fn raw_archive_projection_skips_npm_identity_checks_on_store_hits() {
         .unwrap();
 
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -2763,6 +2783,7 @@ async fn raw_archive_projection_ignores_legacy_package_rows() {
 
     let (writer, writer_task) = StoreIndexWriter::spawn(store_path);
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &fast_fail_client(),
         store_dir: store_path,
         store_index: StoreIndex::shared_readonly_in(store_path),
@@ -2842,6 +2863,7 @@ async fn fetch_and_extract_records_expected_or_computed_integrity() {
         let (store_dir, store_path) = tempdir_with_leaked_path();
         let (writer, writer_task) = StoreIndexWriter::spawn(store_path);
         let result = IngestTarballToStore {
+            extract_observer: None,
             http_client: &client,
             store_dir: store_path,
             store_index: None,
@@ -2902,6 +2924,7 @@ async fn run_without_mem_cache_fetches_unverified_and_writes_no_index_row() {
     let client = fast_fail_client();
     let (writer, writer_task) = StoreIndexWriter::spawn(store_path);
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -2968,6 +2991,7 @@ async fn retries_then_succeeds_on_transient_5xx() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3001,6 +3025,7 @@ async fn revision_addressed_tarball_does_not_retry_a_transient_failure() {
         store_path,
         fast_retry_opts(),
         &AuthHeaders::default(),
+        None,
         None,
         None,
         true,
@@ -3049,6 +3074,7 @@ async fn revision_addressed_tarball_does_not_follow_a_redirect() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         true,
     )
     .await
@@ -3074,6 +3100,7 @@ async fn revision_addressed_mem_cache_does_not_retry_a_failed_prefetch() {
     let auth_headers = AuthHeaders::default();
     let verified_files_cache = SharedVerifiedFilesCache::default();
     let download = || IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -3146,6 +3173,7 @@ async fn revision_addressed_mem_cache_does_not_reuse_a_redirect_permitting_fetch
     let auth_headers = AuthHeaders::default();
     let verified_files_cache = SharedVerifiedFilesCache::default();
     let download = || IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -3217,6 +3245,7 @@ async fn retries_integrity_mismatch_until_exhausted() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3244,6 +3273,7 @@ async fn fetch_for_resolution_computes_integrity_when_none_is_expected() {
     let client = ThrottledClient::default();
 
     let resolved = FetchTarballForResolution {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index_writer: None,
@@ -3285,6 +3315,7 @@ async fn fetch_for_resolution_uses_package_id_for_scoped_auth() {
         AuthHeaders::from_creds_map([(registry_key, "Bearer scoped-token".to_owned())]);
 
     let resolved = FetchTarballForResolution {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index_writer: None,
@@ -3345,6 +3376,7 @@ async fn fetch_for_resolution_reads_manifest_from_subdirectory() {
     let client = ThrottledClient::default();
 
     let resolved = FetchTarballForResolution {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index_writer: None,
@@ -3387,6 +3419,7 @@ async fn fetch_for_resolution_writes_no_index_row_for_a_subdirectory_package() {
     let (writer, writer_task) = StoreIndexWriter::spawn(store_path);
 
     let resolved = FetchTarballForResolution {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index_writer: Some(Arc::clone(&writer)),
@@ -3429,6 +3462,7 @@ async fn fetch_for_resolution_returns_no_manifest_for_subdirectory_without_one()
     let client = ThrottledClient::default();
 
     let resolved = FetchTarballForResolution {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index_writer: None,
@@ -3473,6 +3507,7 @@ async fn fails_fast_on_404() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3513,6 +3548,7 @@ async fn retries_other_4xx_codes() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3546,6 +3582,7 @@ async fn retry_exhaustion_returns_last_error() {
         store_path,
         fast_retry_opts(),
         &AuthHeaders::default(),
+        None,
         None,
         None,
         false,
@@ -3658,6 +3695,7 @@ fn run_with_mem_cache_does_not_deadlock_on_dashmap_shard_contention() {
                 let auth_headers: &'static AuthHeaders =
                     Box::leak(Box::new(AuthHeaders::default()));
                 let make_dts = |url: &'static str| IngestTarballToStore {
+                    extract_observer: None,
                     http_client: client,
                     store_dir: store_path,
                     store_index: None,
@@ -3749,6 +3787,7 @@ async fn zero_retries_makes_a_single_attempt() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3797,6 +3836,7 @@ async fn fetch_attaches_authorization_header_when_creds_match_tarball_url() {
         &auth_headers,
         None,
         None,
+        None,
         false,
     )
     .await
@@ -3838,6 +3878,7 @@ async fn fetch_attaches_authorization_header_when_scope_creds_match_package_id()
         store_path,
         fast_retry_opts(),
         &auth_headers,
+        None,
         None,
         None,
         false,
@@ -3895,6 +3936,7 @@ async fn retry_re_attaches_authorization_header_on_each_attempt() {
         store_path,
         fast_retry_opts(),
         &auth_headers,
+        None,
         None,
         None,
         false,
@@ -3958,6 +4000,7 @@ async fn mem_cache_hit_emits_found_in_store_against_callers_reporter() {
 
     // First requester: silent legacy owner.
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -3989,6 +4032,7 @@ async fn mem_cache_hit_emits_found_in_store_against_callers_reporter() {
     // already reported.
     EVENTS.lock().unwrap().clear();
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -4087,6 +4131,7 @@ async fn mem_cache_hit_skips_package_status_when_progress_already_reported() {
 
     EVENTS.lock().unwrap().clear();
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -4127,6 +4172,7 @@ async fn mem_cache_hit_skips_package_status_when_progress_already_reported() {
 
     EVENTS.lock().unwrap().clear();
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -4211,6 +4257,7 @@ async fn run_with_mem_cache_recovers_from_owning_fetch_error() {
     let auth_headers: &'static AuthHeaders = Box::leak(Box::<AuthHeaders>::default());
 
     let make_dts = || IngestTarballToStore {
+        extract_observer: None,
         http_client: client,
         store_dir: store_path,
         store_index: None,
@@ -4333,6 +4380,7 @@ async fn fetching_progress_and_fetched_events_fire_during_download() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -4426,6 +4474,7 @@ async fn started_fires_for_connection_level_failures() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -4502,6 +4551,7 @@ async fn found_in_store_event_fires_on_cache_hit() {
     let verified_files_cache = SharedVerifiedFilesCache::default();
 
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: None,
@@ -4544,6 +4594,7 @@ async fn found_in_store_event_fires_on_cache_hit() {
 
     EVENTS.lock().unwrap().clear();
     IngestTarballToStore {
+        extract_observer: None,
         http_client: &client,
         store_dir: store_path,
         store_index: Some(store_index),
@@ -4642,6 +4693,7 @@ async fn request_retry_event_fires_per_retried_attempt() {
         store_path,
         fast_retry_opts(),
         &AuthHeaders::default(),
+        None,
         None,
         None,
         false,
@@ -5022,6 +5074,7 @@ async fn offline_mode_skips_network_on_cache_miss() {
     let pkg_id = "@fastify/error@3.3.0";
 
     let err = IngestTarballToStore {
+        extract_observer: None,
         http_client: &ThrottledClient::default(),
         store_dir: store_path,
         store_index: None,
@@ -5096,6 +5149,7 @@ async fn offline_mode_still_uses_prefetched_cache() {
     prefetched.insert(cache_key, Arc::new(HashMap::new()));
 
     let cas_paths = IngestTarballToStore {
+        extract_observer: None,
         http_client: &ThrottledClient::default(),
         store_dir: store_path,
         store_index: None,
@@ -5425,7 +5479,7 @@ fn extract_joins_nested_entry_paths_with_forward_slashes() {
     }
 
     let (cas_paths, _) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
 
     assert!(
         cas_paths.contains_key("bin/nested/tool.js"),
@@ -5547,6 +5601,7 @@ async fn in_progress_events_fire_only_for_big_tarballs() {
             &AuthHeaders::default(),
             None,
             None,
+            None,
             false,
         )
         .await
@@ -5610,6 +5665,7 @@ async fn streaming_download_extracts_a_big_pinned_tarball() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -5620,7 +5676,7 @@ async fn streaming_download_extracts_a_big_pinned_tarball() {
 
     let (reference_keep, reference_store) = tempdir_with_leaked_path();
     let (reference_paths, reference_idx) =
-        stream_extract_gzipped_tarball(&body, reference_store, None)
+        stream_extract_gzipped_tarball(&body, reference_store, None, None)
             .expect("the reference extraction of the same bytes must succeed");
     assert_eq!(
         cas_paths.keys().collect::<std::collections::BTreeSet<_>>(),
@@ -5682,6 +5738,7 @@ async fn chunked_download_extracts_a_body_past_the_buffering_threshold() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -5731,6 +5788,7 @@ async fn oversized_non_gzip_body_reports_the_integrity_verdict_first() {
             store_path,
             fast_retry_opts(),
             &AuthHeaders::default(),
+            None,
             None,
             None,
             false,
@@ -5784,6 +5842,7 @@ async fn streaming_download_integrity_mismatch_retries_and_fails() {
         &AuthHeaders::default(),
         None,
         None,
+        None,
         false,
     )
     .await
@@ -5823,6 +5882,7 @@ async fn streaming_download_corrupt_archive_retries_and_fails() {
         store_path,
         fast_retry_opts(),
         &AuthHeaders::default(),
+        None,
         None,
         None,
         false,
@@ -5865,6 +5925,7 @@ async fn streaming_download_tampered_and_corrupt_body_reports_integrity() {
         store_path,
         fast_retry_opts(),
         &AuthHeaders::default(),
+        None,
         None,
         None,
         false,
@@ -5918,7 +5979,7 @@ fn extract_keeps_only_regular_file_entries() {
     }
 
     let (cas_paths, _) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
 
     assert_eq!(
         cas_paths.keys().collect::<Vec<_>>(),
@@ -5958,7 +6019,7 @@ fn extract_strips_only_one_component_from_a_dot_prefixed_entry_path() {
 
     let tar_bytes = tar_with_raw_entry_name(b"./package/package.json", b"bytes");
     let (cas_paths, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
 
     assert_eq!(cas_paths.keys().collect::<Vec<_>>(), vec!["package/package.json"]);
     assert_eq!(pkg_files_idx.files.keys().collect::<Vec<_>>(), vec!["package/package.json"]);
@@ -6008,7 +6069,7 @@ fn extract_keys_a_root_level_entry_by_its_own_name() {
 
     let tar_bytes = tar_with_root_level_entries();
     let (cas_paths, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
 
     let mut keys = cas_paths.keys().collect::<Vec<_>>();
     keys.sort();
@@ -6030,8 +6091,9 @@ fn streaming_extract_keys_a_root_level_entry_by_its_own_name() {
     let (tempdir, store_path) = tempdir_with_leaked_path();
 
     let tar_bytes = tar_with_root_level_entries();
-    let (cas_paths, _) = stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None)
-        .expect("extract the tarball");
+    let (cas_paths, _) =
+        stream_extract_gzipped_tarball(&gzip_bytes(&tar_bytes), store_path, None, None)
+            .expect("extract the tarball");
 
     let mut keys = cas_paths.keys().collect::<Vec<_>>();
     keys.sort();
@@ -6068,7 +6130,7 @@ async fn read_local_tarball_metadata_reads_a_manifest_at_the_archive_root() {
     // The extraction the resolve-time read has to agree with.
     let (tempdir, store_path) = tempdir_with_leaked_path();
     let (_, pkg_files_idx) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
     assert_eq!(
         pkg_files_idx.manifest.as_ref().and_then(|manifest| manifest["name"].as_str()),
         Some("real-name"),
@@ -6108,7 +6170,7 @@ fn extract_rejects_an_entry_naming_the_archive_root() {
     let (tempdir, store_path) = tempdir_with_leaked_path();
 
     let tar_bytes = tar_with_raw_entry_name(b"./.", b"bytes");
-    let err = extract_tarball_entries(&tar_bytes, store_path, None)
+    let err = extract_tarball_entries(&tar_bytes, store_path, None, None)
         .expect_err("an entry naming the archive root must be rejected");
 
     match err {
@@ -6131,7 +6193,7 @@ fn extract_rejects_an_absolute_entry_path() {
         let (tempdir, store_path) = tempdir_with_leaked_path();
 
         let tar_bytes = tar_with_raw_entry_name(name, b"bytes");
-        let err = extract_tarball_entries(&tar_bytes, store_path, None)
+        let err = extract_tarball_entries(&tar_bytes, store_path, None, None)
             .expect_err("an absolute entry path must be rejected");
 
         match err {
@@ -6155,7 +6217,7 @@ fn extract_rejects_backslash_traversal_in_entry_path() {
     let (tempdir, store_path) = tempdir_with_leaked_path();
 
     let tar_bytes = tar_with_raw_entry_name(br"package/..\..\evil.txt", b"bytes");
-    let err = extract_tarball_entries(&tar_bytes, store_path, None)
+    let err = extract_tarball_entries(&tar_bytes, store_path, None, None)
         .expect_err("a backslash-spelled traversal must be rejected");
 
     match err {
@@ -6177,7 +6239,7 @@ fn extract_reads_a_windows_separator_entry_as_a_nested_path() {
 
     let tar_bytes = tar_with_raw_entry_name(br"package/bin\tool.js", b"bytes");
     let (cas_paths, _) =
-        extract_tarball_entries(&tar_bytes, store_path, None).expect("extract the tarball");
+        extract_tarball_entries(&tar_bytes, store_path, None, None).expect("extract the tarball");
 
     assert!(
         cas_paths.contains_key("bin/tool.js"),
@@ -6205,4 +6267,117 @@ fn url_bearing_errors_redact_inline_credentials() {
         assert!(!message.contains("hunter2"), "the password must not be rendered: {message}");
         assert!(message.contains("example.com/pkg.tgz"), "the host must survive: {message}");
     }
+}
+
+/// Records what an extraction reported, so a test can assert on the
+/// payload the trait hands a host rather than on the fact of a call.
+#[derive(Debug, Default)]
+struct RecordingObserver {
+    seen: std::sync::Mutex<Vec<(Vec<String>, Option<String>)>>,
+}
+
+impl pnpm_store_dir::ExtractObserver for RecordingObserver {
+    fn package_extracted(&self, extracted: pnpm_store_dir::ExtractedPackage<'_>) {
+        let mut paths: Vec<String> = extracted.cas_paths.keys().cloned().collect();
+        paths.sort();
+        let name = extracted
+            .files
+            .manifest
+            .as_ref()
+            .and_then(|manifest| manifest.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        self.seen.lock().expect("record the extraction").push((paths, name));
+    }
+}
+
+fn observed_tarball() -> Vec<u8> {
+    let mut tar_bytes = Vec::new();
+    let mut builder = tar::Builder::new(&mut tar_bytes);
+    for (path, body) in [
+        ("package/package.json", &br#"{"name":"observed","version":"1.0.0"}"#[..]),
+        ("package/index.js", &b"module.exports = 1\n"[..]),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o644);
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_cksum();
+        builder.append_data(&mut header, path, body).expect("append entry");
+    }
+    builder.finish().expect("finalize tar");
+    drop(builder);
+    tar_bytes
+}
+
+/// A registered observer is told what the extraction wrote: every file's
+/// package-relative path, the CAS file behind it, and the manifest naming
+/// the package. Without the paths a host would have to re-walk the store
+/// to find what just landed.
+#[test]
+fn an_observer_is_told_what_the_eager_extraction_wrote() {
+    let (tempdir, store_path) = tempdir_with_leaked_path();
+    let observer = RecordingObserver::default();
+
+    let (cas_paths, _) =
+        extract_tarball_entries(&observed_tarball(), store_path, None, Some(&observer))
+            .expect("extract the tarball");
+
+    let seen = observer.seen.lock().expect("read the records");
+    assert_eq!(seen.len(), 1, "one package extracted, so one notification");
+    let (paths, name) = &seen[0];
+    assert_eq!(paths, &["index.js".to_string(), "package.json".to_string()]);
+    assert_eq!(name.as_deref(), Some("observed"));
+    // The observer sees the same map the extraction returns, so a host can
+    // read the bytes it was told about.
+    assert_eq!(paths.len(), cas_paths.len());
+    for path in paths {
+        assert!(cas_paths[path].is_file(), "{path} must name a written CAS file");
+    }
+
+    drop(tempdir);
+}
+
+/// The streaming extractor takes a different route to the same outputs, so
+/// it has to notify too — a package large enough to stream is exactly the
+/// one a host most wants to hear about.
+#[test]
+fn an_observer_is_told_what_the_streaming_extraction_wrote() {
+    let (tempdir, store_path) = tempdir_with_leaked_path();
+    let observer = RecordingObserver::default();
+
+    stream_extract_gzipped_tarball(
+        &gzip_bytes(&observed_tarball()),
+        store_path,
+        None,
+        Some(&observer),
+    )
+    .expect("stream-extract the tarball");
+
+    let seen = observer.seen.lock().expect("read the records");
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].0, ["index.js".to_string(), "package.json".to_string()]);
+    assert_eq!(seen[0].1.as_deref(), Some("observed"));
+
+    drop(tempdir);
+}
+
+/// pnpm registers no observer, and the extraction must behave identically
+/// without one. This is the control: it fails if the notification were ever
+/// made mandatory or given a side effect on the outputs.
+#[test]
+fn extraction_without_an_observer_produces_the_same_outputs() {
+    let (tempdir, store_path) = tempdir_with_leaked_path();
+    let observer = RecordingObserver::default();
+
+    let (observed, _) =
+        extract_tarball_entries(&observed_tarball(), store_path, None, Some(&observer))
+            .expect("extract with an observer");
+    let (plain, _) = extract_tarball_entries(&observed_tarball(), store_path, None, None)
+        .expect("extract without one");
+
+    assert_eq!(observed, plain);
+    assert_eq!(observer.seen.lock().expect("read the records").len(), 1);
+
+    drop(tempdir);
 }

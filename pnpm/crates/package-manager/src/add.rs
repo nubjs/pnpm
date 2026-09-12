@@ -1210,6 +1210,7 @@ async fn resolve_aliasless_tarball(
         fetch_context: Some(TarballFetchContext {
             store_dir: &config.store_dir,
             store_index_writer: None,
+            extract_observer: config.extract_observer.clone(),
             mem_cache: None,
             auth_headers: Arc::clone(&config.auth_headers),
             retry_opts: crate::retry_config::retry_opts_from_config(config),
@@ -1418,6 +1419,7 @@ fn aliasless_git_resolver(
         http_client: Arc::clone(http_client),
         store_dir: &config.store_dir,
         store_index_writer: None,
+        extract_observer: config.extract_observer.clone(),
         auth_headers: Arc::clone(&config.auth_headers),
         retry_opts: crate::retry_config::retry_opts_from_config(config),
         git_shallow_hosts: config.git_shallow_hosts.clone(),

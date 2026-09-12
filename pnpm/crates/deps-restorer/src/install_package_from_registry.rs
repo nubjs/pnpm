@@ -159,6 +159,7 @@ impl InstallPackageFromRegistry<'_> {
         IngestTarballToStore {
             http_client: self.http_client,
             store_dir: &config.store_dir,
+            extract_observer: config.extract_observer.clone(),
             store_index: self.store_index.cloned(),
             store_index_writer: self.store_index_writer.cloned(),
             verify_store_integrity: config.verify_store_integrity,

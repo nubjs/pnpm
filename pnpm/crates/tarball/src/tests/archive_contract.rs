@@ -198,6 +198,7 @@ impl Container {
             Self::TarGz => input.run_without_mem_cache::<SilentReporter>().await,
             Self::Zip => {
                 IngestZipArchiveToStore {
+                    extract_observer: None,
                     http_client: input.http_client,
                     store_dir: input.store_dir,
                     store_index: input.store_index.clone(),
@@ -246,6 +247,7 @@ async fn formats_share_projection_offline_replay_and_missing_blob_validation() {
             let auth = AuthHeaders::default();
             let url = format!("{}/artifact", registry.url());
             let mut input = IngestTarballToStore {
+                extract_observer: None,
                 http_client: &client,
                 store_dir: store,
                 store_index: None,
@@ -313,6 +315,7 @@ async fn formats_share_retry_classification_and_never_publish_failed_integrity()
             let auth = AuthHeaders::default();
             let url = format!("{}/artifact", registry.url());
             let mut input = IngestTarballToStore {
+                extract_observer: None,
                 http_client: &client,
                 store_dir: store,
                 store_index: None,

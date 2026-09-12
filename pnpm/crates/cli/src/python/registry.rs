@@ -161,6 +161,7 @@ impl Registry<'_> {
         let integrity = wheel.integrity()?;
         let package_id = format!("python:{}", wheel.name);
         let files = IngestZipArchiveToStore {
+            extract_observer: None,
             http_client: self.client,
             store_dir: &self.config.store_dir,
             store_index: self.store_index.clone(),

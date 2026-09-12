@@ -37,6 +37,7 @@ use dashmap::{DashMap, DashSet};
 use pipe_trait::Pipe;
 use pnpm_network::{AuthHeaders, ThrottledClient, UNPRIORITIZED};
 use pnpm_reporter::Reporter;
+pub use pnpm_store_dir::{ExtractObserver, ExtractedPackage, SharedExtractObserver};
 use pnpm_store_dir::{StoreDir, StoreIndexWriter, store_index_key};
 use rayon::prelude::*;
 use ssri::Integrity;
@@ -443,6 +444,7 @@ impl<'a> IngestTarballToStore<'a> {
         ingestion::ArchiveIngestion {
             http_client: self.http_client,
             store_dir: self.store_dir,
+            extract_observer: &self.extract_observer,
             store_index: &self.store_index,
             store_index_writer: &self.store_index_writer,
             verify_store_integrity: self.verify_store_integrity,
@@ -494,6 +496,10 @@ pub struct ResolvedTarball {
 pub struct FetchTarballForResolution<'a> {
     pub http_client: &'a ThrottledClient,
     pub store_dir: &'static StoreDir,
+    /// Notified once per package this fetch extracts. A resolve-time fetch
+    /// writes the same store rows an install one does, so a host that
+    /// observes extractions has to see these too.
+    pub extract_observer: SharedExtractObserver,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
     pub package_url: &'a str,
     /// Package identity used for scoped auth lookup and for the
@@ -540,6 +546,7 @@ impl FetchTarballForResolution<'_> {
                 self.retry_opts,
                 self.auth_headers,
                 None,
+                self.extract_observer.clone(),
                 None,
                 false,
             )

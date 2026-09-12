@@ -11,6 +11,7 @@ use pnpm_package_manifest::{
 use pnpm_store_dir::{
     CafsFileInfo, FileHash, PackageFilesIndex, StoreDir, WriteCasFileFromReaderError,
 };
+use pnpm_store_dir::{ExtractObserver, ExtractedPackage};
 use tar::Archive;
 use tracing::instrument;
 use zune_inflate::{DeflateDecoder, DeflateOptions, errors::DecodeErrorStatus};
@@ -114,6 +115,7 @@ pub(crate) fn extract_gzipped_tarball(
     unpacked_size: Option<usize>,
     store_dir: &StoreDir,
     ignore_file_pattern: Option<&IgnoreEntryFilter>,
+    observer: Option<&dyn ExtractObserver>,
 ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     // Route on the larger of the two claims about the unpacked size.
     // Neither is trustworthy, and taking the larger is the conservative
@@ -121,17 +123,19 @@ pub(crate) fn extract_gzipped_tarball(
     // that does not, or the other way round.
     let unpacked_size = unpacked_size.max(gzip_isize_hint(gz_data));
     if should_stream_extract(gz_data.len(), unpacked_size) {
-        return stream_extract_gzipped_tarball(gz_data, store_dir, ignore_file_pattern);
+        return stream_extract_gzipped_tarball(gz_data, store_dir, ignore_file_pattern, observer);
     }
     match decompress_gzip(gz_data, unpacked_size) {
-        Ok(tar_data) => extract_tarball_entries(&tar_data, store_dir, ignore_file_pattern),
+        Ok(tar_data) => {
+            extract_tarball_entries(&tar_data, store_dir, ignore_file_pattern, observer)
+        }
         Err(error) if is_eager_decode_limit_exceeded(&error) => {
             tracing::debug!(
                 target: "pacquet::download",
                 gz_data_len = gz_data.len(),
                 "archive inflated past the eager decode ceiling; extracting it as a stream",
             );
-            stream_extract_gzipped_tarball(gz_data, store_dir, ignore_file_pattern)
+            stream_extract_gzipped_tarball(gz_data, store_dir, ignore_file_pattern, observer)
         }
         Err(error) => Err(error),
     }
@@ -293,11 +297,13 @@ pub(crate) fn stream_extract_gzipped_channel(
     rx: BodyChunkReceiver,
     store_dir: &StoreDir,
     ignore_file_pattern: Option<&IgnoreEntryFilter>,
+    observer: Option<&dyn ExtractObserver>,
 ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     extract_tarball_entries_streaming(
         flate2::read::GzDecoder::new(ChannelBytesReader::new(rx)),
         store_dir,
         ignore_file_pattern,
+        observer,
     )
 }
 
@@ -533,6 +539,7 @@ pub(crate) fn extract_tarball_entries(
     tar_data: &[u8],
     store_dir: &StoreDir,
     ignore_file_pattern: Option<&IgnoreEntryFilter>,
+    observer: Option<&dyn ExtractObserver>,
 ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     let mut archive = Archive::new(Cursor::new(tar_data));
     let entries = archive
@@ -580,7 +587,12 @@ pub(crate) fn extract_tarball_entries(
     }
 
     let written = write_pending_files(store_dir, &pending)?;
-    Ok(assemble_extract_output(written, manifest, manifest_build_scripts || file_build_hooks))
+    Ok(assemble_extract_output(
+        written,
+        manifest,
+        manifest_build_scripts || file_build_hooks,
+        observer,
+    ))
 }
 
 /// Hash and write a slice of pending files into the content-addressed
@@ -620,6 +632,7 @@ fn assemble_extract_output(
     written: Vec<(String, PathBuf, CafsFileInfo)>,
     manifest: Option<serde_json::Value>,
     requires_build: bool,
+    observer: Option<&dyn ExtractObserver>,
 ) -> (HashMap<String, PathBuf>, PackageFilesIndex) {
     let mut cas_paths = HashMap::<String, PathBuf>::with_capacity(written.len());
     let mut files = HashMap::with_capacity(written.len());
@@ -641,6 +654,14 @@ fn assemble_extract_output(
         side_effects: None,
         remote_side_effects_quarantine: None,
     };
+    // Both extraction paths, eager and streaming, assemble their outputs
+    // here, so this is the one place a host learns of every package the
+    // install extracted.
+    if let Some(observer) = observer {
+        observer
+            .package_extracted(ExtractedPackage { cas_paths: &cas_paths, files: &pkg_files_idx });
+    }
+
     (cas_paths, pkg_files_idx)
 }
 
@@ -773,11 +794,13 @@ pub(crate) fn stream_extract_gzipped_tarball(
     gz_data: &[u8],
     store_dir: &StoreDir,
     ignore_file_pattern: Option<&IgnoreEntryFilter>,
+    observer: Option<&dyn ExtractObserver>,
 ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     extract_tarball_entries_streaming(
         flate2::read::GzDecoder::new(gz_data),
         store_dir,
         ignore_file_pattern,
+        observer,
     )
 }
 
@@ -799,6 +822,7 @@ pub(crate) fn extract_tarball_entries_streaming(
     reader: impl Read,
     store_dir: &StoreDir,
     ignore_file_pattern: Option<&IgnoreEntryFilter>,
+    observer: Option<&dyn ExtractObserver>,
 ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
     let mut archive = Archive::new(reader);
     let mut extract = StreamingExtract::new(store_dir);
@@ -814,7 +838,7 @@ pub(crate) fn extract_tarball_entries_streaming(
         extract.build_hooks |= files_include_install_scripts([meta.cleaned_path.as_str()]);
         extract.add_entry(&mut entry, meta)?;
     }
-    extract.finish()
+    extract.finish(observer)
 }
 
 /// The header fields of one regular-file tar entry, with its path validated
@@ -954,9 +978,12 @@ impl<'a> StreamingExtract<'a> {
         )
     }
 
-    fn finish(mut self) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
+    fn finish(
+        mut self,
+        observer: Option<&dyn ExtractObserver>,
+    ) -> Result<(HashMap<String, PathBuf>, PackageFilesIndex), TarballError> {
         self.flush()?;
-        Ok(assemble_extract_output(self.written, self.manifest, self.build_hooks))
+        Ok(assemble_extract_output(self.written, self.manifest, self.build_hooks, observer))
     }
 }
 

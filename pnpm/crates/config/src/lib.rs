@@ -966,6 +966,14 @@ pub struct Config {
     #[default(_code = "Embedder::PNPM")]
     pub embedder: Embedder,
 
+    /// Notified once per package an install extracts into the store.
+    ///
+    /// `None` for pnpm itself. An embedding host sets it on the seed config
+    /// to observe package contents at the point they land on disk, which is
+    /// the only place the whole file set of a freshly-fetched package is
+    /// known without re-walking the store.
+    pub extract_observer: pnpm_store_dir::SharedExtractObserver,
+
     /// Whether recursive commands stop after the first failure.
     #[default = true]
     pub bail: bool,

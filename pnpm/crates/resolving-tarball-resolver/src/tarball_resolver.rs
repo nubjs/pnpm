@@ -31,6 +31,10 @@ use ssri::Integrity;
 pub struct TarballFetchContext {
     pub store_dir: &'static StoreDir,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
+    /// Notified once per package a resolve-time fetch extracts into the
+    /// store. Carries [`Config::extract_observer`] so the packages a
+    /// resolution materializes are observed like an install's own.
+    pub extract_observer: pnpm_store_dir::SharedExtractObserver,
     pub mem_cache: Option<Arc<MemCache>>,
     pub auth_headers: Arc<AuthHeaders>,
     pub retry_opts: RetryOpts,
@@ -181,6 +185,7 @@ impl TarballResolver {
             http_client: &self.http_client,
             store_dir: ctx.store_dir,
             store_index_writer: ctx.store_index_writer.clone(),
+            extract_observer: ctx.extract_observer.clone(),
             package_url: resolved_url,
             package_id: normalized_bare_specifier,
             auth_headers: &ctx.auth_headers,

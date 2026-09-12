@@ -1,8 +1,10 @@
+mod extract_observer;
 pub mod store_index;
 
 pub use add_files_from_dir::*;
 pub use cas_file::*;
 pub use check_pkg_files_integrity::*;
+pub use extract_observer::*;
 pub use msgpackr_records::*;
 pub use pkg_content_check::*;
 pub use project_registry::*;

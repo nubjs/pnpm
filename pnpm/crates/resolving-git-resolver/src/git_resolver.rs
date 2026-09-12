@@ -71,6 +71,10 @@ pub struct GitFetchContext {
     pub http_client: Arc<ThrottledClient>,
     pub store_dir: &'static StoreDir,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
+    /// Notified once per package a resolve-time fetch extracts into the
+    /// store. Carries [`Config::extract_observer`] so the packages a
+    /// resolution materializes are observed like an install's own.
+    pub extract_observer: pnpm_store_dir::SharedExtractObserver,
     pub auth_headers: Arc<AuthHeaders>,
     pub retry_opts: RetryOpts,
     /// Hosts that opt into `git init` + `git fetch --depth 1` instead
@@ -170,6 +174,7 @@ impl<Probe: GitProbe + 'static, Runner: GitCommandRunner + 'static> GitResolver<
                     http_client: &ctx.http_client,
                     store_dir: ctx.store_dir,
                     store_index_writer: ctx.store_index_writer.clone(),
+                    extract_observer: ctx.extract_observer.clone(),
                     package_url: &tarball_url,
                     // A git host's archive URL is the package's only
                     // identifier at this point — its name is what this

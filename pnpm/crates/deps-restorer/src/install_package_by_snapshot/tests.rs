@@ -1498,6 +1498,7 @@ async fn an_unpinned_delegate_to_a_directory_keeps_its_resolution() {
     let resolution = session
         .resolve_tarball_integrity::<pnpm_reporter::SilentReporter>(
             pnpm_tarball::IngestTarballToStore {
+                extract_observer: None,
                 http_client: &pnpm_network::ThrottledClient::default(),
                 store_dir: &config.store_dir,
                 store_index: None,

@@ -466,6 +466,8 @@ pub struct IngestZipArchiveToStore<'a> {
     pub store_dir: &'static StoreDir,
     pub store_index: Option<SharedReadonlyStoreIndex>,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
+    /// Notified once per package this ingestion extracts into the store.
+    pub extract_observer: crate::SharedExtractObserver,
     pub verify_store_integrity: bool,
     /// See [`crate::download::IngestTarballToStore::strict_store_pkg_content_check`].
     pub strict_store_pkg_content_check: bool,
@@ -509,6 +511,7 @@ impl IngestZipArchiveToStore<'_> {
         crate::ingestion::ArchiveIngestion {
             http_client: self.http_client,
             store_dir: self.store_dir,
+            extract_observer: &self.extract_observer,
             store_index: &self.store_index,
             store_index_writer: &self.store_index_writer,
             verify_store_integrity: self.verify_store_integrity,

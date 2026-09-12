@@ -92,6 +92,8 @@ struct OwnedFetchCtx {
     http_client: Arc<ThrottledClient>,
     mem_cache: Arc<MemCache>,
     store_dir: &'static StoreDir,
+    /// Notified once per package a fetch here extracts into the store.
+    extract_observer: pnpm_store_dir::SharedExtractObserver,
     store_index: Option<SharedReadonlyStoreIndex>,
     store_index_writer: Option<Arc<StoreIndexWriter>>,
     verified_files_cache: SharedVerifiedFilesCache,
@@ -274,6 +276,7 @@ impl<Reporter: self::Reporter + 'static> PrefetchingResolver<Reporter> {
         let resolved = FetchTarballForResolution {
             http_client: &self.ctx.http_client,
             store_dir: self.ctx.store_dir,
+            extract_observer: self.ctx.extract_observer.clone(),
             store_index_writer: self.ctx.store_index_writer.clone(),
             package_url,
             package_id,
@@ -418,6 +421,7 @@ impl OwnedFetchCtx {
         IngestTarballToStore {
             http_client: &self.http_client,
             store_dir: self.store_dir,
+            extract_observer: self.extract_observer.clone(),
             store_index: self.store_index.clone(),
             store_index_writer: self.store_index_writer.clone(),
             verify_store_integrity: self.verify_store_integrity,
@@ -460,6 +464,7 @@ fn owned_fetch_context(prefetch_ctx: &PrefetchContext<'_>) -> OwnedFetchCtx {
         http_client: Arc::clone(http_client),
         mem_cache: Arc::clone(mem_cache),
         store_dir: &config.store_dir,
+        extract_observer: config.extract_observer.clone(),
         store_index: store_index.cloned(),
         store_index_writer: store_index_writer.cloned(),
         verified_files_cache: SharedVerifiedFilesCache::clone(verified_files_cache),
