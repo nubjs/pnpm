@@ -1,4 +1,5 @@
 pub mod config_types;
+pub mod embedder;
 pub mod esm_node_path_loader;
 pub mod known_settings;
 pub mod matcher;
@@ -19,6 +20,7 @@ pub use crate::{
         default_workspace_concurrency, install_command_for, is_unsafe_perm_posix,
         resolve_child_concurrency, resolve_configured_state_dir, standalone_install_command,
     },
+    embedder::Embedder,
     global_bin_check::{CheckGlobalBinDirError, check_global_bin_dir},
     npmrc_auth::{BasicAuth, RegistryCreds, is_json_auth_scope, validate_json_auth_registry},
 };
@@ -959,6 +961,11 @@ pub struct HoistPatterns {
 /// (project-structural settings).
 #[derive(Debug, Clone, SmartDefault)]
 pub struct Config {
+    /// The naming profile of the host embedding the engine. Defaults to
+    /// [`Embedder::PNPM`], which is pnpm's own naming.
+    #[default(_code = "Embedder::PNPM")]
+    pub embedder: Embedder,
+
     /// Whether recursive commands stop after the first failure.
     #[default = true]
     pub bail: bool,
@@ -3077,7 +3084,7 @@ impl Config {
                 .and_then(serde_json::Value::as_str)
             {
                 Some(raw) => dir.join(raw),
-                None => self.modules_dir.join(".pnpm"),
+                None => self.modules_dir.join(self.embedder.virtual_store_dirname),
             };
         }
     }
@@ -3166,7 +3173,7 @@ impl Config {
     pub fn wanted_lockfile_name(&self) -> &str {
         match &self.git_branch_lockfile_name {
             Some(name) if !self.merge_git_branch_lockfiles => name,
-            _ => Lockfile::FILE_NAME,
+            _ => self.embedder.lockfile_basename,
         }
     }
 
@@ -3521,7 +3528,7 @@ impl Config {
     /// Anchor module defaults to the requested directory, which may differ from the process cwd.
     fn anchor_default_module_dirs(&mut self, start_dir: &std::path::Path) {
         self.modules_dir = start_dir.join("node_modules");
-        self.virtual_store_dir = self.modules_dir.join(".pnpm");
+        self.virtual_store_dir = self.modules_dir.join(self.embedder.virtual_store_dirname);
     }
 
     fn apply_bootstrap_settings<Sys: EnvVar>(
@@ -3817,7 +3824,8 @@ impl Config {
             // been applied yet at this point in the cascade.
             self.modules_dir = base_dir.join("node_modules");
             if !explicit.virtual_store_dir {
-                self.virtual_store_dir = base_dir.join("node_modules").join(".pnpm");
+                self.virtual_store_dir =
+                    base_dir.join("node_modules").join(self.embedder.virtual_store_dirname);
             }
             // The workspace root is structural context (env-lockfile reads/
             // writes, pin persistence), not a "setting" — set it whenever a
