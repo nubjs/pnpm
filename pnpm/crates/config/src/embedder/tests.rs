@@ -246,6 +246,37 @@ fn host_settings_apply_where_the_workspace_yaml_would() {
     assert_eq!(config.workspace_dir.as_deref(), Some(workspace.path()));
 }
 
+/// `catalog:` specifiers resolve against `pnpm-workspace.yaml` read a second
+/// time as a workspace manifest, which a host that supplies settings has no
+/// equivalent of, so the host's catalogs have to reach `Config::catalogs` —
+/// the override every consumer reads first. An explicit `catalogs.default`
+/// wins over `catalog`, as it does for the manifest.
+#[test]
+fn host_settings_carry_the_catalogs_a_workspace_manifest_would() {
+    let dir = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(dir.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
+        .expect("write the manifest");
+
+    let embedder = Embedder {
+        workspace_settings: Some(host_settings(serde_json::json!({
+            "catalog": { "picocolors": "1.1.1" },
+            "catalogs": { "default": { "picocolors": "1.1.0" }, "legacy": { "semver": "6.3.1" } },
+        }))),
+        ..NUB
+    };
+    let config = Config { embedder, ..Config::default() }
+        .current::<crate::Host>(dir.path())
+        .expect("load config");
+    let catalogs = config.catalogs.expect("the host catalogs reach the config");
+    assert_eq!(catalogs["default"]["picocolors"], "1.1.0");
+    assert_eq!(catalogs["legacy"]["semver"], "6.3.1");
+
+    // pnpm's own profile reads its catalogs from the workspace manifest, so
+    // nothing here fills the field for it.
+    let config = Config::default().current::<crate::Host>(dir.path()).expect("load config");
+    assert_eq!(config.catalogs, None);
+}
+
 /// With no pnpm configuration read there is no default pnpmfile to look for
 /// either. `None` is what sends the hook finder looking for `.pnpmfile.cjs`;
 /// an empty list runs none.

@@ -3966,7 +3966,44 @@ impl Config {
             for_self_update,
         )?;
         self.workspace_dir = workspace_dir;
+        self.apply_host_catalogs(settings);
         Ok(())
+    }
+
+    /// Project the catalogs out of [`Embedder::workspace_settings`].
+    ///
+    /// For pnpm, `catalog:` specifiers resolve against `pnpm-workspace.yaml`
+    /// read a second time as a workspace *manifest*, so the settings layer
+    /// alone never reaches them. A host that supplies its own settings has no
+    /// such file, and [`Self::catalogs`] is the override every consumer
+    /// consults first, so the host's catalogs are written there instead.
+    ///
+    /// `catalog` becomes the default catalog and `catalogs` names the rest,
+    /// the same projection the workspace manifest gets. An explicit
+    /// `catalogs.default` is applied last and so wins, matching the order
+    /// pnpm's own reader uses.
+    fn apply_host_catalogs(&mut self, settings: &WorkspaceSettings) {
+        if self.catalogs.is_some() {
+            return;
+        }
+        // The settings parser keeps a catalog in declaration order; the
+        // catalog type the resolver consumes is sorted.
+        fn flatten(entries: &IndexMap<String, String>) -> BTreeMap<String, String> {
+            entries.iter().map(|(name, spec)| (name.clone(), spec.clone())).collect()
+        }
+        let mut catalogs = pnpm_catalogs_types::Catalogs::new();
+        if let Some(default) = &settings.catalog {
+            catalogs
+                .insert(pnpm_catalogs_types::DEFAULT_CATALOG_NAME.to_string(), flatten(default));
+        }
+        if let Some(named) = &settings.catalogs {
+            for (name, catalog) in named {
+                catalogs.insert(name.clone(), flatten(catalog));
+            }
+        }
+        if !catalogs.is_empty() {
+            self.catalogs = Some(catalogs);
+        }
     }
 
     /// Apply the global layer without changing the discovered workspace directory.
