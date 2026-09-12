@@ -120,7 +120,8 @@ fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Res
     // The default reporter's `Done in ... using pacquet v<version>` footer needs
     // the version before the first event (including the fast path's).
     pnpm_default_reporter::set_package_version(pnpm_config::PNPM_VERSION);
-    let (command, argv) = prepare_cli_argv(argv);
+    pnpm_default_reporter::set_program_name(embedder.program_name);
+    let (command, argv) = prepare_cli_argv(argv, embedder);
     let mut args = match parse_cli_args(command, argv.clone()) {
         Ok(args) => args,
         Err(err) if err.kind() == clap::error::ErrorKind::DisplayVersion => {
@@ -323,8 +324,13 @@ fn configure_rayon_pool() {
 mod tests;
 
 /// Normalize pnpm argument syntax before passing it to clap.
-fn prepare_cli_argv(argv: Vec<OsString>) -> (clap::Command, Vec<OsString>) {
-    let command = with_boolean_negations(CliArgs::command());
+fn prepare_cli_argv(
+    argv: Vec<OsString>,
+    embedder: pnpm_config::Embedder,
+) -> (clap::Command, Vec<OsString>) {
+    let command = with_boolean_negations(CliArgs::command())
+        .name(embedder.program_name)
+        .bin_name(embedder.program_name);
     let argv = shorthands::expand_universal_shorthands(&command, argv);
     let argv = boolean_values::resolve_boolean_values(argv);
     let argv = renamed_options::drop_shadowed_aliases(&command, argv);

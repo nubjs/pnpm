@@ -38,6 +38,7 @@ use crate::{
 static CWD: OnceLock<String> = OnceLock::new();
 static USE_STDERR: OnceLock<bool> = OnceLock::new();
 static PACKAGE_VERSION: OnceLock<String> = OnceLock::new();
+static PROGRAM_NAME: OnceLock<String> = OnceLock::new();
 static FORCE_APPEND_ONLY: OnceLock<bool> = OnceLock::new();
 static SUMMARY_SCOPE: OnceLock<SummaryScope> = OnceLock::new();
 static REPORTS_SCOPE: OnceLock<bool> = OnceLock::new();
@@ -85,6 +86,16 @@ pub fn set_package_version(version: impl Into<String>) {
 
 pub(crate) fn package_version() -> &'static str {
     PACKAGE_VERSION.get().map(String::as_str).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Set the program name rendered in the `Done in ... using <name> v<version>`
+/// footer. Call once before the first event; ignored if already set.
+pub fn set_program_name(name: impl Into<String>) {
+    let _ = PROGRAM_NAME.set(name.into());
+}
+
+pub(crate) fn program_name() -> &'static str {
+    PROGRAM_NAME.get().map_or("pnpm", String::as_str)
 }
 
 /// Force append-only rendering regardless of whether stdout is a TTY,

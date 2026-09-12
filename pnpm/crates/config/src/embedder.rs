@@ -24,6 +24,10 @@
 /// time; that also keeps the type `Copy` so passing it around costs nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Embedder {
+    /// Name the program is invoked by. Shown in command-line help and in
+    /// the reporter's completion footer.
+    pub program_name: &'static str,
+
     /// Basename of the lockfile the engine reads and writes, as returned by
     /// [`Config::wanted_lockfile_name`](crate::Config::wanted_lockfile_name)
     /// when no git-branch lockfile is in play.
@@ -39,6 +43,7 @@ pub struct Embedder {
 impl Embedder {
     /// pnpm's own names. The default, and what standalone pnpm always uses.
     pub const PNPM: Self = Embedder {
+        program_name: "pnpm",
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
         virtual_store_dirname: ".pnpm",
     };

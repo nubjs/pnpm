@@ -3,12 +3,17 @@ use pretty_assertions::assert_eq;
 use std::path::PathBuf;
 
 /// A host that is not pnpm, with both names replaced.
-const NUB: Embedder = Embedder { lockfile_basename: "nub.lock", virtual_store_dirname: ".store" };
+const NUB: Embedder = Embedder {
+    program_name: "nub",
+    lockfile_basename: "nub.lock",
+    virtual_store_dirname: ".store",
+};
 
 #[test]
 fn default_profile_keeps_pnpm_naming() {
     let config = Config::default();
     assert_eq!(config.embedder, Embedder::PNPM);
+    assert_eq!(config.embedder.program_name, "pnpm");
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");
     assert_eq!(config.embedder.virtual_store_dirname, ".pnpm");
 }
