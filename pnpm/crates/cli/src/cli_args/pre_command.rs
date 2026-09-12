@@ -65,8 +65,9 @@ pub(crate) fn pre_command_plan(
         &PreCommandInput {
             switch: SwitchInput::from_cli_args(args),
             global: is_global(&args.command),
-            skip_pm_handling: should_skip_pm_handling(&args.command),
-            check_runtimes: true,
+            skip_pm_handling: should_skip_pm_handling(&args.command)
+                || !args.embedder.manage_package_manager_versions,
+            check_runtimes: args.embedder.manage_runtimes,
             emit: reporter_emit(args.reporter),
             key_issues: key_issue_reporting(&args.command),
         },

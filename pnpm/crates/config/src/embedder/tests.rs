@@ -2,9 +2,13 @@ use crate::{Config, embedder::Embedder};
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
 
-/// A host that is not pnpm, with both names replaced.
+/// A host that is not pnpm: its own naming, and version management left to
+/// the host rather than the engine.
 const NUB: Embedder = Embedder {
     program_name: "nub",
+    program_version: "0.0.0-test",
+    manage_package_manager_versions: false,
+    manage_runtimes: false,
     lockfile_basename: "nub.lock",
     virtual_store_dirname: ".store",
 };
@@ -14,6 +18,8 @@ fn default_profile_keeps_pnpm_naming() {
     let config = Config::default();
     assert_eq!(config.embedder, Embedder::PNPM);
     assert_eq!(config.embedder.program_name, "pnpm");
+    assert!(config.embedder.manage_package_manager_versions);
+    assert!(config.embedder.manage_runtimes);
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");
     assert_eq!(config.embedder.virtual_store_dirname, ".pnpm");
 }

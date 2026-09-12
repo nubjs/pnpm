@@ -119,7 +119,7 @@ fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Res
     let argv = with_current::rewrite(argv)?;
     // The default reporter's `Done in ... using pacquet v<version>` footer needs
     // the version before the first event (including the fast path's).
-    pnpm_default_reporter::set_package_version(pnpm_config::PNPM_VERSION);
+    pnpm_default_reporter::set_package_version(embedder.program_version);
     pnpm_default_reporter::set_program_name(embedder.program_name);
     let (command, argv) = prepare_cli_argv(argv, embedder);
     let mut args = match parse_cli_args(command, argv.clone()) {

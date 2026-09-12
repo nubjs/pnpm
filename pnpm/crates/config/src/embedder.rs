@@ -28,6 +28,20 @@ pub struct Embedder {
     /// the reporter's completion footer.
     pub program_name: &'static str,
 
+    /// Version rendered beside [`Self::program_name`] in the reporter's
+    /// completion footer.
+    pub program_version: &'static str,
+
+    /// Whether a `packageManager` / `devEngines.packageManager` pin is
+    /// acted on: resolved, downloaded, and delegated to, and reported as an
+    /// error when it names a different package manager. A host that owns
+    /// version management for its own users turns this off.
+    pub manage_package_manager_versions: bool,
+
+    /// Whether `devEngines.runtime` / `engines.runtime` entries are checked
+    /// against the installed runtime.
+    pub manage_runtimes: bool,
+
     /// Basename of the lockfile the engine reads and writes, as returned by
     /// [`Config::wanted_lockfile_name`](crate::Config::wanted_lockfile_name)
     /// when no git-branch lockfile is in play.
@@ -44,6 +58,9 @@ impl Embedder {
     /// pnpm's own names. The default, and what standalone pnpm always uses.
     pub const PNPM: Self = Embedder {
         program_name: "pnpm",
+        program_version: crate::defaults::PNPM_VERSION,
+        manage_package_manager_versions: true,
+        manage_runtimes: true,
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
         virtual_store_dirname: ".pnpm",
     };
