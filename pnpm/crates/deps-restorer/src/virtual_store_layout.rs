@@ -98,6 +98,19 @@ pub struct VirtualStoreLayout {
     /// lockfile context, in which case `link:` dependencies inside a
     /// slot are left unlinked exactly as before.
     lockfile_dir: Option<PathBuf>,
+
+    /// The project's own virtual store, kept alongside the shared one so
+    /// [`Self::slot_dir`] can place a package in the project when the
+    /// host's [`MaterializePolicy`](pnpm_store_dir::MaterializePolicy)
+    /// says it must not be shared. `None` whenever
+    /// [`Self::package_store_dir`] already is the project's, which is
+    /// every install with the global virtual store off.
+    local_store_dir: Option<PathBuf>,
+
+    /// The keys that policy named. Resolved once while the layout is
+    /// built rather than per slot lookup, so the decision cannot differ
+    /// between two reads of the same package.
+    locally_materialized: HashSet<PackageKey>,
 }
 
 impl VirtualStoreLayout {
@@ -115,6 +128,8 @@ impl VirtualStoreLayout {
             gvs_suffixes: None,
             virtual_store_dir_max_length,
             lockfile_dir: None,
+            local_store_dir: None,
+            locally_materialized: HashSet::new(),
         }
     }
 
@@ -209,14 +224,18 @@ impl VirtualStoreLayout {
         };
         let virtual_store_dir_max_length = config.virtual_store_dir_max_length as usize;
         if !config.enable_global_virtual_store {
+            // Every slot is already in the project, so a policy asking for
+            // that has nothing to change.
             return VirtualStoreLayout {
                 package_store_dir,
                 gvs_suffixes: None,
                 virtual_store_dir_max_length,
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
+                local_store_dir: None,
+                locally_materialized: HashSet::new(),
             };
         }
-        Self::global(
+        let mut layout = Self::global(
             package_store_dir,
             virtual_store_dir_max_length,
             engine,
@@ -224,7 +243,33 @@ impl VirtualStoreLayout {
             packages,
             allow_build_policy,
             lockfile_dir,
-        )
+        );
+        layout.apply_materialize_policy(config, snapshots);
+        layout
+    }
+
+    /// Record which of `snapshots` the host's policy keeps out of the
+    /// shared store, and where those go instead.
+    ///
+    /// Only ever narrows: with no policy, or with one that names nothing,
+    /// the layout is exactly what [`Self::global`] built.
+    fn apply_materialize_policy(
+        &mut self,
+        config: &Config,
+        snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
+    ) {
+        let (Some(policy), Some(snapshots)) = (config.materialize_policy.as_deref(), snapshots)
+        else {
+            return;
+        };
+        self.locally_materialized = snapshots
+            .keys()
+            .filter(|key| policy.materialize_locally(&key.pkg_id()))
+            .cloned()
+            .collect();
+        if !self.locally_materialized.is_empty() {
+            self.local_store_dir = Some(config.virtual_store_dir.clone());
+        }
     }
 
     /// [`Self::new`], with the derived suffix map cached on disk.
@@ -281,26 +326,33 @@ impl VirtualStoreLayout {
                 entries = gvs_suffixes.len(),
                 "phase complete",
             );
-            return Self::with_cached_suffixes(config, gvs_suffixes, lockfile_dir);
+            return Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), lockfile_dir);
         }
         let gvs_suffixes = hasher.suffixes(snapshots);
         if let Some(cache_file) = cache_file {
             gvs_layout_cache::store(cache_file, &gvs_suffixes);
         }
-        Self::with_cached_suffixes(config, gvs_suffixes, lockfile_dir)
+        Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), lockfile_dir)
     }
 
     fn with_cached_suffixes(
         config: &Config,
         gvs_suffixes: HashMap<PackageKey, String>,
+        snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
         lockfile_dir: Option<&Path>,
     ) -> Self {
-        VirtualStoreLayout {
+        let mut layout = VirtualStoreLayout {
             package_store_dir: config.global_virtual_store_dir.clone(),
             gvs_suffixes: Some(gvs_suffixes),
             virtual_store_dir_max_length: config.virtual_store_dir_max_length as usize,
             lockfile_dir: lockfile_dir.map(Path::to_path_buf),
-        }
+            local_store_dir: None,
+            locally_materialized: HashSet::new(),
+        };
+        // The cache stores the suffix map, which the policy does not
+        // touch, so a cached layout still has to be narrowed here.
+        layout.apply_materialize_policy(config, snapshots);
+        layout
     }
 
     /// Build a GVS-shaped layout rooted at `package_store_dir`,
@@ -327,6 +379,8 @@ impl VirtualStoreLayout {
                 gvs_suffixes: Some(HashMap::new()),
                 virtual_store_dir_max_length,
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
+                local_store_dir: None,
+                locally_materialized: HashSet::new(),
             };
         };
         let mut hasher =
@@ -336,6 +390,8 @@ impl VirtualStoreLayout {
             gvs_suffixes: Some(hasher.suffixes(snapshots)),
             virtual_store_dir_max_length,
             lockfile_dir: lockfile_dir.map(Path::to_path_buf),
+            local_store_dir: None,
+            locally_materialized: HashSet::new(),
         }
     }
 
@@ -377,12 +433,23 @@ impl VirtualStoreLayout {
     /// re-published with different integrity.
     #[must_use]
     pub fn hashed_slot_dir(&self, key: &PackageKey) -> Option<PathBuf> {
+        // A package held out of the shared store has no canonical shared
+        // slot, so the directory-clone cache must not claim one for it.
+        if self.locally_materialized.contains(key) {
+            return None;
+        }
         let suffix = self.gvs_suffixes.as_ref()?.get(key)?;
         Some(join_global_virtual_store_path(&self.package_store_dir, suffix))
     }
 
     #[must_use]
     pub fn slot_dir(&self, key: &PackageKey) -> PathBuf {
+        if let Some(local_store_dir) = self.local_store_dir.as_ref()
+            && self.locally_materialized.contains(key)
+        {
+            return local_store_dir
+                .join(key.to_virtual_store_name(self.virtual_store_dir_max_length));
+        }
         let suffix = match &self.gvs_suffixes {
             Some(map) => map
                 .get(key)

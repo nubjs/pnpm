@@ -974,6 +974,14 @@ pub struct Config {
     /// known without re-walking the store.
     pub extract_observer: pnpm_store_dir::SharedExtractObserver,
 
+    /// Names the packages that must be materialized in the project rather
+    /// than in a store shared across projects.
+    ///
+    /// `None` for pnpm itself, which shares every package it can. An
+    /// embedding host sets it when something about a package has to differ
+    /// per project.
+    pub materialize_policy: pnpm_store_dir::SharedMaterializePolicy,
+
     /// Whether recursive commands stop after the first failure.
     #[default = true]
     pub bail: bool,

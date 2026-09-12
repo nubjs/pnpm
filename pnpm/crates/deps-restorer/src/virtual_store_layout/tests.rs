@@ -1367,3 +1367,101 @@ fn layout_cache_load_rejects_a_map_it_cannot_vouch_for() {
         "bytes that are not a map must miss rather than parse as an empty one",
     );
 }
+
+/// Names one package, so a test can assert the layout splits rather than
+/// moves wholesale.
+#[derive(Debug)]
+struct MaterializeOnly(&'static str);
+
+impl pnpm_store_dir::MaterializePolicy for MaterializeOnly {
+    fn materialize_locally(&self, package_id: &str) -> bool {
+        package_id == self.0
+    }
+}
+
+/// Two packages, one of which the policy keeps out of the shared store.
+fn two_package_gvs_fixture() -> (Config, HashMap<PackageKey, SnapshotEntry>) {
+    let config = make_config(
+        true,
+        PathBuf::from("/tmp/proj/node_modules/.pnpm"),
+        PathBuf::from("/tmp/store/links"),
+    );
+    let mut snapshots = HashMap::new();
+    for id in ["@scope/foo@1.2.3", "bar@4.5.6"] {
+        snapshots.insert(id.parse::<PackageKey>().unwrap(), SnapshotEntry::default());
+    }
+    (config, snapshots)
+}
+
+/// A package the policy names gets a project-local slot, while its
+/// sibling stays in the shared store. Asserting on both is what makes
+/// this a split rather than "GVS turned itself off".
+#[test]
+fn the_materialize_policy_moves_only_the_named_package_into_the_project() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    config.materialize_policy = Some(std::sync::Arc::new(MaterializeOnly("@scope/foo@1.2.3")));
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+    );
+
+    let named: PackageKey = "@scope/foo@1.2.3".parse().unwrap();
+    let sibling: PackageKey = "bar@4.5.6".parse().unwrap();
+
+    assert_eq!(
+        layout.slot_dir(&named),
+        PathBuf::from("/tmp/proj/node_modules/.pnpm/@scope+foo@1.2.3"),
+        "the named package belongs to the project",
+    );
+    assert!(
+        layout.slot_dir(&sibling).starts_with("/tmp/store/links"),
+        "an unnamed package keeps the shared store: {:?}",
+        layout.slot_dir(&sibling),
+    );
+}
+
+/// The directory-clone cache serves a canonical shared slot, which a
+/// project-local package does not have. Without this the cache could hand
+/// back the shared copy and undo the split.
+#[test]
+fn a_locally_materialized_package_has_no_canonical_shared_slot() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    config.materialize_policy = Some(std::sync::Arc::new(MaterializeOnly("@scope/foo@1.2.3")));
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(layout.hashed_slot_dir(&"@scope/foo@1.2.3".parse().unwrap()), None);
+    assert!(layout.hashed_slot_dir(&"bar@4.5.6".parse().unwrap()).is_some());
+}
+
+/// pnpm sets no policy, and the layout must be exactly what it was. This
+/// is the control: it fails if the policy path ever ran unconditionally.
+#[test]
+fn without_a_policy_every_package_keeps_the_shared_store() {
+    let (config, snapshots) = two_package_gvs_fixture();
+    assert!(config.materialize_policy.is_none());
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+    );
+
+    for id in ["@scope/foo@1.2.3", "bar@4.5.6"] {
+        let key: PackageKey = id.parse().unwrap();
+        assert!(layout.slot_dir(&key).starts_with("/tmp/store/links"), "{id} must stay shared");
+        assert!(layout.hashed_slot_dir(&key).is_some(), "{id} must keep its canonical slot");
+    }
+}

@@ -44,3 +44,26 @@ pub trait ExtractObserver: std::fmt::Debug + Send + Sync {
 
 /// An observer an install carries, if its host registered one.
 pub type SharedExtractObserver = Option<Arc<dyn ExtractObserver>>;
+
+/// Decides which packages must be materialized in the project rather than
+/// in a store shared across projects.
+///
+/// Under the global virtual store a package directory lives outside the
+/// project and is shared by every project resolving the same content, so
+/// nothing project-specific can be written inside it. A host that needs
+/// per-project content in a package — a resolution shim, a repair, an
+/// analysis artifact — names that package here and the install gives it a
+/// project-local directory instead.
+///
+/// Asked once per package while the layout is built, so an implementation
+/// is consulted a bounded number of times and may be as expensive as a map
+/// lookup. pnpm sets no policy, and without one every package takes the
+/// shared layout, which is the behavior this replaces nothing of.
+pub trait MaterializePolicy: std::fmt::Debug + Send + Sync {
+    /// `true` when `package_id` — the install's `"{name}@{version}"`
+    /// identifier — must not be shared between projects.
+    fn materialize_locally(&self, package_id: &str) -> bool;
+}
+
+/// A materialization policy an install carries, if its host set one.
+pub type SharedMaterializePolicy = Option<Arc<dyn MaterializePolicy>>;

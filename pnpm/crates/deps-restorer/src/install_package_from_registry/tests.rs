@@ -33,6 +33,7 @@ fn create_config(
     Config {
         embedder: Default::default(),
         extract_observer: None,
+        materialize_policy: None,
         bail: true,
         ci: false,
         update_notifier: true,
