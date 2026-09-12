@@ -2409,8 +2409,7 @@ fn extend_project_manifests(
     config: &Config,
     project_manifests: &[(PathBuf, &PackageManifest)],
 ) -> Result<Vec<(PathBuf, PackageManifest)>, InstallError> {
-    let compat_extender = (!config.ignore_compatibility_db)
-        .then(crate::compat_package_extensions::compat_package_extender);
+    let compat_extender = crate::compat_package_extensions::compat_package_extender(config);
     let extender = match config.package_extensions.as_ref() {
         Some(extensions) => crate::PackageExtender::new(extensions)
             .map(|extender| (!extender.is_empty()).then_some(extender))

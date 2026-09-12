@@ -89,6 +89,15 @@ pub struct Embedder {
     /// when there is no workspace. Supplying them does not make a directory a
     /// workspace.
     pub workspace_settings: Option<&'static crate::WorkspaceSettings>,
+
+    /// Compatibility rules the host adds beneath the engine's own database of
+    /// `@yarnpkg/extensions` and pnpm's additions. They repair published
+    /// manifests at resolve time exactly as the built-in rules do, stay out of
+    /// the lockfile's `packageExtensionsChecksum`, and are declined together
+    /// with them by `ignoreCompatibilityDb`. Where a host rule and a built-in
+    /// rule set the same field, the built-in rule wins.
+    pub compat_package_extensions:
+        Option<&'static indexmap::IndexMap<String, crate::PackageExtension>>,
 }
 
 impl Embedder {
@@ -103,6 +112,7 @@ impl Embedder {
         virtual_store_dirname: ".pnpm",
         reads_pnpm_config: true,
         workspace_settings: None,
+        compat_package_extensions: None,
     };
 }
 

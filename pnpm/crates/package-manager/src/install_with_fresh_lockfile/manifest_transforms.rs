@@ -106,8 +106,9 @@ impl ImporterTransforms {
         deploy_manifest_hook: bool,
     ) -> Result<Self, InstallWithFreshLockfileError> {
         Ok(Self {
-            compat_package_extender: (!config.ignore_compatibility_db)
-                .then(crate::compat_package_extensions::compat_package_extender),
+            compat_package_extender: crate::compat_package_extensions::compat_package_extender(
+                config,
+            ),
             package_extender: configured_package_extender(config)?,
             versions_overrider: versions_overrider.filter(|overrider| !overrider.is_empty()),
             deploy_manifest_hook,
