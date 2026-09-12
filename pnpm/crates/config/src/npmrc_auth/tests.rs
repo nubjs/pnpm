@@ -1431,7 +1431,7 @@ macro_rules! static_env_with_vars {
 #[test]
 fn url_scoped_env_reads_npm_config_auth_token() {
     static_env_with_vars!(Env, &[("npm_config_//registry.npmjs.org/:_authToken", "npm-env-token")]);
-    let auth = NpmrcAuth::from_url_scoped_env::<Env>();
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(true);
     assert_eq!(default_auth_token(&auth, "//registry.npmjs.org/"), Some(Some("npm-env-token")));
 }
 
@@ -1441,7 +1441,7 @@ fn url_scoped_env_reads_pnpm_config_auth_token() {
         Env,
         &[("pnpm_config_//registry.npmjs.org/:_authToken", "pnpm-env-token")]
     );
-    let auth = NpmrcAuth::from_url_scoped_env::<Env>();
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(true);
     assert_eq!(default_auth_token(&auth, "//registry.npmjs.org/"), Some(Some("pnpm-env-token")));
 }
 
@@ -1454,8 +1454,24 @@ fn url_scoped_env_pnpm_prefix_wins_over_npm() {
             ("pnpm_config_//registry.npmjs.org/:_authToken", "pnpm-env-token"),
         ]
     );
-    let auth = NpmrcAuth::from_url_scoped_env::<Env>();
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(true);
     assert_eq!(default_auth_token(&auth, "//registry.npmjs.org/"), Some(Some("pnpm-env-token")));
+}
+
+/// A profile that reads no pnpm configuration drops the `pnpm_config_`
+/// spelling outright, so the npm spelling of the same credential applies. The
+/// test above, on the same two variables, is the control.
+#[test]
+fn url_scoped_env_without_pnpm_config_keeps_only_the_npm_prefix() {
+    static_env_with_vars!(
+        Env,
+        &[
+            ("npm_config_//registry.npmjs.org/:_authToken", "npm-env-token"),
+            ("pnpm_config_//registry.npmjs.org/:_authToken", "pnpm-env-token"),
+        ]
+    );
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(false);
+    assert_eq!(default_auth_token(&auth, "//registry.npmjs.org/"), Some(Some("npm-env-token")));
 }
 
 #[test]
@@ -1468,7 +1484,7 @@ fn url_scoped_env_ignores_non_url_and_empty_values() {
             ("PATH", "/usr/bin"),
         ]
     );
-    let auth = NpmrcAuth::from_url_scoped_env::<Env>();
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(true);
     assert!(auth.creds_by_scope_by_uri.is_empty());
     assert!(auth.registry.is_none());
 }
@@ -1484,7 +1500,7 @@ fn url_scoped_env_ignores_non_ascii_names_without_panicking() {
             ("ñpm_config_//registry.example/:_authToken", "ignored"),
         ]
     );
-    let auth = NpmrcAuth::from_url_scoped_env::<Env>();
+    let auth = NpmrcAuth::from_url_scoped_env::<Env>(true);
     assert!(auth.creds_by_scope_by_uri.is_empty());
 }
 

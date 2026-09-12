@@ -3522,13 +3522,25 @@ impl Config {
             for_self_update,
         )?;
 
+        if let Some(settings) = self.embedder.workspace_settings {
+            self.apply_host_settings::<Sys>(
+                settings,
+                start_dir,
+                &mut explicit,
+                &mut declared_registries,
+                for_self_update,
+            )?;
+        }
+
         // Apply `_auth` routes after workspace yaml (so they win over
         // repo-controlled registries) but before `PNPM_CONFIG_*` (so an
         // explicit `pnpm_config_registry` / `--registry` still wins) —
         // pnpm's "CLI > _auth > yaml" precedence.
         npmrc_auth.apply_json_env_registries(&mut self, &declared_registries);
 
-        self.apply_env_settings::<Sys>(&mut explicit, &default_state_dir, start_dir);
+        if self.embedder.reads_pnpm_config {
+            self.apply_env_settings::<Sys>(&mut explicit, &default_state_dir, start_dir);
+        }
 
         if !self.explicit_settings.contains_key("lockfile") {
             self.lockfile = self.package_lock;
@@ -3537,6 +3549,12 @@ impl Config {
         self.apply_store_derivations::<Sys>(explicit, &mut npmrc_auth, start_dir)?;
 
         self.apply_layout_derivations::<Sys>();
+
+        // `None` sends the hook finder looking for the default
+        // `.pnpmfile.cjs`, which is pnpm's own file; an empty list runs none.
+        if !self.embedder.reads_pnpm_config && self.pnpmfile.is_none() {
+            self.pnpmfile = Some(Vec::new());
+        }
 
         Ok(self)
     }
@@ -3583,6 +3601,9 @@ impl Config {
     fn load_global_settings<Sys: EnvVar>(
         &self,
     ) -> Result<Option<WorkspaceSettings>, LoadWorkspaceYamlError> {
+        if !self.embedder.reads_pnpm_config {
+            return Ok(None);
+        }
         let mut global_settings =
             self.config_dir.as_deref().map(WorkspaceSettings::load_global).transpose()?.flatten();
         if let Some(global_settings) = global_settings.as_mut() {
@@ -3918,6 +3939,36 @@ impl Config {
         Ok(())
     }
 
+    /// Apply [`Embedder::workspace_settings`] in the slot the workspace yaml
+    /// fills, through [`Self::apply_workspace_settings`] so they get the
+    /// yaml's trust filtering and explicit-setting bookkeeping. The discovered
+    /// workspace directory is restored afterwards, because `apply_to` records
+    /// its base directory as the workspace root and supplying settings does
+    /// not make a project a workspace.
+    fn apply_host_settings<Sys>(
+        &mut self,
+        settings: &WorkspaceSettings,
+        start_dir: &Path,
+        explicit: &mut ExplicitPaths,
+        declared_registries: &mut crate::npmrc_auth::DeclaredRegistries,
+        for_self_update: bool,
+    ) -> Result<(), LoadWorkspaceYamlError>
+    where
+        Sys: EnvVar + EnvVarOs + GetCurrentDir + GetHomeDir + LinkProbe,
+    {
+        let workspace_dir = self.workspace_dir.clone();
+        let base_dir = workspace_dir.clone().unwrap_or_else(|| start_dir.to_path_buf());
+        self.apply_workspace_settings::<Sys>(
+            settings.clone(),
+            &base_dir,
+            explicit,
+            declared_registries,
+            for_self_update,
+        )?;
+        self.workspace_dir = workspace_dir;
+        Ok(())
+    }
+
     /// Apply the global layer without changing the discovered workspace directory.
     /// Relative paths use `start_dir`, except `stateDir`: its global-shim trust
     /// records must resolve outside the project being considered for execution.
@@ -3980,10 +4031,13 @@ impl Config {
             workspace_yaml.as_ref().map_or(start_dir, |(base_dir, _)| base_dir.as_path());
         let project_source =
             project_auth_source::<Sys>(project_npmrc_dir, user_npmrc_path.as_deref());
-        let auth_ini_source = auth_ini_source::<Sys>(global_config_dir);
+        let reads_pnpm_config = self.embedder.reads_pnpm_config;
+        let auth_ini_source =
+            reads_pnpm_config.then(|| auth_ini_source::<Sys>(global_config_dir)).flatten();
         let user_source = user_auth_source::<Sys>(user_npmrc_path.as_deref());
-        let env_scoped_source = env_scoped_auth_source::<Sys>();
-        let env_json_source = env_json_auth_source::<Sys>(global_settings)?;
+        let env_scoped_source = env_scoped_auth_source::<Sys>(reads_pnpm_config);
+        let env_json_source =
+            if reads_pnpm_config { env_json_auth_source::<Sys>(global_settings)? } else { None };
 
         // Capture the trusted sources (everything but `project_source`) for
         // [`PackageManagerBootstrap`] before the fold below consumes them.
@@ -4027,13 +4081,20 @@ impl Config {
     /// then `PNPM_CONFIG_NPMRC_AUTH_FILE`, `PNPM_CONFIG_USERCONFIG`, the
     /// global `config.yaml`'s `npmrcAuthFile` and `npm_config_userconfig`.
     /// Each env var is empty-filtered individually (a `value !== ''` check).
+    /// The `PNPM_CONFIG_*` spellings are skipped for a profile that reads no
+    /// pnpm configuration.
     fn user_npmrc_path<Sys: EnvVar>(
         &self,
         global_settings: Option<&WorkspaceSettings>,
     ) -> Option<PathBuf> {
         self.npmrc_auth_file.clone().or_else(|| {
-            read_pnpm_env::<Sys>("npmrc_auth_file", "NPMRC_AUTH_FILE")
-                .or_else(|| read_pnpm_env::<Sys>("userconfig", "USERCONFIG"))
+            self.embedder
+                .reads_pnpm_config
+                .then(|| {
+                    read_pnpm_env::<Sys>("npmrc_auth_file", "NPMRC_AUTH_FILE")
+                        .or_else(|| read_pnpm_env::<Sys>("userconfig", "USERCONFIG"))
+                })
+                .flatten()
                 .map(PathBuf::from)
                 .or_else(|| {
                     global_settings
@@ -4068,6 +4129,11 @@ impl Config {
         let workspace_yaml = if self.ignore_workspace {
             None
         } else if let Some(env_dir) = env_workspace_dir {
+            if !self.embedder.reads_pnpm_config {
+                // The variable still names the workspace root; only the yaml
+                // inside it is pnpm's.
+                return Ok(Some((env_dir, None)));
+            }
             // Env-var path: load yaml directly from the env dir. A
             // missing file is silent, but the re-anchor still fires
             // because the user has explicitly told us where the
@@ -4088,7 +4154,12 @@ impl Config {
                 }
             }
         } else {
-            WorkspaceSettings::find_and_load(start_dir)?
+            let found = if self.embedder.reads_pnpm_config {
+                WorkspaceSettings::find_and_load(start_dir)?
+            } else {
+                None
+            };
+            found
                 .map(|(path, settings)| {
                     let base_dir = path.parent().unwrap_or(start_dir).to_path_buf();
                     (base_dir, Some(settings))
@@ -4186,8 +4257,8 @@ fn parse_trusted_source<Sys: EnvVar>(text: &str, dir: &Path, path: &Path) -> Npm
 /// environment, not the repository) and host-scoped by construction, so
 /// they sit at the top of the precedence chain — above the project
 /// `.npmrc` — following the env-over-workspace ordering.
-fn env_scoped_auth_source<Sys: EnvVar>() -> Option<NpmrcAuth> {
-    let auth = NpmrcAuth::from_url_scoped_env::<Sys>();
+fn env_scoped_auth_source<Sys: EnvVar>(include_pnpm_config: bool) -> Option<NpmrcAuth> {
+    let auth = NpmrcAuth::from_url_scoped_env::<Sys>(include_pnpm_config);
     (!auth.creds_by_scope_by_uri.is_empty()).then_some(auth)
 }
 
@@ -4313,11 +4384,11 @@ fn build_package_manager_bootstrap<Sys: EnvVar>(
     })
 }
 
-/// Workspace package patterns declared by the `workspaces` array of the
-/// `package.json` in `dir`, the way npm and Yarn spell them.
+/// Workspace package patterns declared by the `workspaces` field of the
+/// `package.json` in `dir`: npm's array, or the `packages` array of the object
+/// spelling Yarn and Bun also accept (Bun keeps its catalogs beside it).
 ///
-/// Only the array spelling counts, and only a non-empty one, which is the
-/// same shape pnpm's own `workspaces`-field warning recognizes. Best-effort
+/// Only a non-empty list counts. Best-effort
 /// like [`read_npmrc`]: an absent, unreadable or malformed manifest reads as
 /// "declares no workspace", and the install reports it properly later.
 ///
@@ -4326,9 +4397,10 @@ fn build_package_manager_bootstrap<Sys: EnvVar>(
 fn manifest_workspace_patterns(dir: &Path) -> Option<Vec<String>> {
     let text = fs::read_to_string(dir.join("package.json")).ok()?;
     let manifest = pnpm_package_manifest::parse_manifest(&text).ok()?;
-    let patterns: Vec<String> = manifest
-        .get("workspaces")?
-        .as_array()?
+    let workspaces = manifest.get("workspaces")?;
+    let patterns: Vec<String> = workspaces
+        .as_array()
+        .or_else(|| workspaces.get("packages")?.as_array())?
         .iter()
         .filter_map(|pattern| pattern.as_str().map(str::to_string))
         .collect();

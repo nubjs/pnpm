@@ -193,13 +193,14 @@ impl NpmrcAuth {
     /// them a safe, file-free way to configure registry auth. The prefix is
     /// matched case-insensitively (as npm does); the remainder keeps its case
     /// because credential keys are case-sensitive (`:_authToken`). When the
-    /// same key is set through both prefixes, `pnpm_config_` wins.
+    /// same key is set through both prefixes, `pnpm_config_` wins, and the
+    /// `pnpm_config_` prefix is skipped outright unless `include_pnpm_config`.
     ///
     /// Only the four credential fields (`_authToken`, `_auth`, `username`,
     /// `_password`) are honored — the same set [`split_creds_key`] recognises.
     /// Values are used verbatim (no `${VAR}` re-expansion): they already come
     /// resolved from the environment.
-    pub fn from_url_scoped_env<Sys: EnvVar>() -> Self {
+    pub fn from_url_scoped_env<Sys: EnvVar>(include_pnpm_config: bool) -> Self {
         // Merge into one map keyed by the URL-scoped key so each key is applied
         // once. `pnpm_config_` is extended last so it wins over `npm_config_`.
         let mut npm_scoped: HashMap<String, String> = HashMap::new();
@@ -208,6 +209,9 @@ impl NpmrcAuth {
             let Some((is_pnpm, key)) = parse_url_scoped_env_name(&name) else {
                 continue;
             };
+            if is_pnpm && !include_pnpm_config {
+                continue;
+            }
             let target = if is_pnpm { &mut pnpm_scoped } else { &mut npm_scoped };
             target.insert(key.to_owned(), value);
         }

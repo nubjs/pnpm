@@ -230,7 +230,7 @@ impl Default for PythonSettings {
 
 /// `sideEffectsCache` as written: either a bare boolean, or the declaration
 /// carrying all three parts.
-#[derive(Debug, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SideEffectsCacheSetting {
     Enabled(bool),
@@ -242,7 +242,7 @@ pub enum SideEffectsCacheSetting {
 
 /// Where a dependency's build output may be reused from: this machine, and —
 /// through [`Self::remote`] — other machines in the same organization.
-#[derive(Debug, Default, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SideEffectsCacheSettings {
     /// Restore a package's build from the cache when one is present.
@@ -315,7 +315,7 @@ impl RemoteSideEffectsCacheSettings {
 /// settings such as `allowBuilds`) from this file rather than from
 /// `package.json`'s `pnpm` field, resolving those settings against the
 /// workspace dir.
-#[derive(Debug, Default, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WorkspaceSettings {
     pub bail: Option<bool>,

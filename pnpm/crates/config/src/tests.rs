@@ -371,6 +371,45 @@ pub fn state_dir_uses_only_trusted_config_sources() {
     assert!(config.state_dir.as_os_str().is_empty());
 }
 
+/// A profile that reads no pnpm configuration skips each of pnpm's own
+/// sources — the global `config.yaml`, `PNPM_CONFIG_*`, and the
+/// `PNPM_CONFIG_USERCONFIG` spelling — while npm's spelling of the same
+/// setting still applies. The pnpm profile on the same environment is the
+/// control that shows every one of those sources is live.
+#[test]
+pub fn a_profile_that_reads_no_pnpm_config_skips_pnpm_env_and_global_config() {
+    fake_env!();
+    let xdg = tempdir().expect("xdg tempdir");
+    fs::create_dir_all(xdg.path().join("pnpm")).expect("create config dir");
+    fs::write(xdg.path().join("pnpm").join("config.yaml"), "fetchRetries: 7\n")
+        .expect("write global config.yaml");
+    let rc = tempdir().expect("npmrc tempdir");
+    let pnpm_rc = rc.path().join("pnpm.npmrc");
+    fs::write(&pnpm_rc, "registry=https://pnpm-spelling.example/\n").expect("write npmrc");
+    let npm_rc = rc.path().join("npm.npmrc");
+    fs::write(&npm_rc, "registry=https://npm-spelling.example/\n").expect("write npmrc");
+    let project = tempdir().expect("project tempdir");
+    set_fake_env(&[
+        ("XDG_CONFIG_HOME", xdg.path().to_str().unwrap()),
+        ("PNPM_CONFIG_NODE_LINKER", "hoisted"),
+        ("PNPM_CONFIG_USERCONFIG", pnpm_rc.to_str().unwrap()),
+        ("npm_config_userconfig", npm_rc.to_str().unwrap()),
+    ]);
+
+    let pnpm = Config::default().current::<FakeEnv>(project.path()).expect("load config");
+    assert_eq!(pnpm.fetch_retries, 7);
+    assert_eq!(pnpm.node_linker, crate::NodeLinker::Hoisted);
+    assert_eq!(pnpm.registry, "https://pnpm-spelling.example/");
+
+    let embedder = crate::Embedder { reads_pnpm_config: false, ..crate::Embedder::PNPM };
+    let host = Config { embedder, ..Config::default() }
+        .current::<FakeEnv>(project.path())
+        .expect("load config");
+    assert_eq!(host.fetch_retries, Config::default().fetch_retries);
+    assert_ne!(host.node_linker, crate::NodeLinker::Hoisted);
+    assert_eq!(host.registry, "https://npm-spelling.example/");
+}
+
 #[test]
 pub fn global_dirs_use_only_trusted_config_sources() {
     fake_env!(load_with_fake_env);

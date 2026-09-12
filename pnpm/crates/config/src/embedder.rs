@@ -1,17 +1,17 @@
-//! The embedder profile: the brand-bearing names a host that is not pnpm
-//! itself has to replace.
+//! The embedder profile: what a host that is not pnpm itself has to change
+//! about the engine.
 //!
 //! pacquet is consumed as a library by hosts other than the `pnpm` binary —
 //! `@pnpm/napi` exposes it to Node.js, and a native Rust host links the
 //! crates directly. Most of what such a host needs to override is already a
 //! plain [`Config`](crate::Config) field it can assign after
 //! [`Config::current`](crate::Config::current): `user_agent`, `store_dir`,
-//! `cache_dir` and the rest. Two names are not reachable that way, because
-//! the engine derives them internally rather than reading them from a field:
-//! the wanted lockfile's basename, and the leaf directory of the virtual
-//! store. This profile carries those.
+//! `cache_dir` and the rest. This profile carries what is not reachable that
+//! way: names the engine derives internally rather than reading from a field,
+//! behavior decided before any `Config` exists, and where the configuration
+//! itself comes from.
 //!
-//! The default is pnpm's own naming, so a host that never touches the field
+//! The default is pnpm's own profile, so a host that never touches the field
 //! behaves exactly as before.
 
 /// The names an embedding host substitutes for pnpm's own.
@@ -20,9 +20,10 @@
 /// the engine would otherwise use a hard-coded pnpm name. [`Embedder::PNPM`]
 /// is the default and reproduces pnpm's behavior exactly.
 ///
-/// The fields are `&'static str` because a host's brand is fixed at compile
-/// time; that also keeps the type `Copy` so passing it around costs nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Borrowed fields are `'static`, which keeps the type `Copy` so passing it
+/// around costs nothing: a host's brand is fixed at compile time, and settings
+/// a host resolves at startup live for the rest of the run.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Embedder {
     /// Name the program is invoked by. Shown in command-line help and in
     /// the reporter's completion footer.
@@ -48,11 +49,13 @@ pub struct Embedder {
     /// pnpm declares them in `pnpm-workspace.yaml` and warns when it finds
     /// the manifest field instead, so this is off for pnpm. A host whose
     /// users declare a workspace the npm way turns it on: an ancestor
-    /// manifest carrying a non-empty `workspaces` array then marks the
+    /// manifest carrying a non-empty `workspaces` list (the array, or the
+    /// `packages` of the object spelling) then marks the
     /// workspace root and supplies
     /// [`Config::workspace_package_patterns`](crate::Config::workspace_package_patterns),
-    /// and the warning goes away. `pnpm-workspace.yaml` still wins wherever
-    /// both exist.
+    /// and the warning goes away. For a profile that also
+    /// [reads pnpm's configuration](Self::reads_pnpm_config),
+    /// `pnpm-workspace.yaml` still wins wherever both exist.
     pub workspaces_from_package_manifest: bool,
 
     /// Basename of the lockfile the engine reads and writes, as returned by
@@ -65,6 +68,27 @@ pub struct Embedder {
     /// store directory is derived; an explicit `virtualStoreDir` setting
     /// still wins.
     pub virtual_store_dirname: &'static str,
+
+    /// Whether the engine reads the configuration only pnpm defines: the
+    /// `pnpm-workspace.yaml` search, the global `config.yaml` and `auth.ini`,
+    /// `pnpm_config_*` / `PNPM_CONFIG_*` environment variables, and the
+    /// default `.pnpmfile.cjs` / `.pnpmfile.mjs`.
+    ///
+    /// A host with a configuration file of its own turns this off and passes
+    /// what it resolved as [`Self::workspace_settings`]. The sources pnpm
+    /// shares with npm — the `.npmrc` chain and `npm_config_*` — are read
+    /// either way, as are command-line options.
+    pub reads_pnpm_config: bool,
+
+    /// Settings the host resolved from its own configuration, applied where
+    /// `pnpm-workspace.yaml` sits in the cascade: above the `.npmrc` chain and
+    /// the global `config.yaml`, below `PNPM_CONFIG_*`. They pass through the
+    /// same filtering as the workspace yaml, since a host's project
+    /// configuration is exactly as repository-controlled, and relative paths
+    /// in them resolve against the workspace root, or the project directory
+    /// when there is no workspace. Supplying them does not make a directory a
+    /// workspace.
+    pub workspace_settings: Option<&'static crate::WorkspaceSettings>,
 }
 
 impl Embedder {
@@ -77,6 +101,8 @@ impl Embedder {
         workspaces_from_package_manifest: false,
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
         virtual_store_dirname: ".pnpm",
+        reads_pnpm_config: true,
+        workspace_settings: None,
     };
 }
 
