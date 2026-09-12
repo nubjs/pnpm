@@ -434,7 +434,7 @@ pub(crate) fn configured_or_discovered_workspace_dir(
 ) -> Result<Option<PathBuf>, pnpm_workspace::FindWorkspaceDirError> {
     match config.workspace_dir.clone() {
         Some(workspace_dir) => Ok(Some(workspace_dir)),
-        None => pnpm_workspace::find_workspace_dir(manifest_dir),
+        None => crate::workspace_discovery::discovered_workspace_dir(config, manifest_dir),
     }
 }
 

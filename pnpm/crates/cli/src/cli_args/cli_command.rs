@@ -478,8 +478,16 @@ impl CliArgs {
             .or_else(|_| std::path::absolute(&self.dir))
             .unwrap_or_else(|_| self.dir.clone())
             .pipe_deref(pnpm_fs::lexical_normalize);
-        let workspace_dir = pnpm_workspace::find_workspace_dir(&dir)
+        // A host that reads none of pnpm's configuration does not have a
+        // `pnpm-workspace.yaml` to find; its own root reaches the commands
+        // through `Config`, so `-w` cannot resolve one here.
+        let workspace_dir = self
+            .embedder
+            .reads_pnpm_config
+            .then(|| pnpm_workspace::find_workspace_dir(&dir))
+            .transpose()
             .map_err(WorkspaceRootError::FindWorkspaceDir)?
+            .flatten()
             .ok_or(WorkspaceRootError::NotInWorkspace)?;
         self.dir = workspace_dir;
         // pnpm's parser writes the workspace root into `cliOptions.dir`, so
@@ -497,6 +505,7 @@ impl CliArgs {
             .pipe_deref(pnpm_fs::lexical_normalize);
         if !self.recursive
             && self.command.recursive_by_default()
+            && self.embedder.reads_pnpm_config
             && pnpm_workspace::find_workspace_dir(&dir).is_ok_and(|dir| dir.is_some())
         {
             self.recursive = true;
