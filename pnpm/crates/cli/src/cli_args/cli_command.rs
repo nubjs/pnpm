@@ -140,6 +140,12 @@ pub struct CliArgs {
     #[clap(skip)]
     pub dir_from_command_line: bool,
 
+    /// Naming profile of the host running the engine. An embedding host
+    /// fills this in at its entry point; the pnpm binary leaves it at
+    /// [`Embedder::PNPM`], which is pnpm's own naming.
+    #[clap(skip)]
+    pub embedder: pnpm_config::Embedder,
+
     /// Directory in which the package store is created. Relative paths
     /// are resolved from the workspace root, or from `--dir` outside a
     /// workspace.

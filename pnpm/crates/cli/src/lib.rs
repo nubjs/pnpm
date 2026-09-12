@@ -84,6 +84,26 @@ fn run_cli() -> miette::Result<()> {
         )]
         std::process::exit(exit_code);
     }
+    run_argv(argv, pnpm_config::Embedder::PNPM)
+}
+
+/// Run the CLI in-process on a caller-supplied command line.
+///
+/// The entry point for a host embedding the engine as a library. `argv` is
+/// a full command line whose first element is the program name, and
+/// `embedder` supplies the naming a host substitutes for pnpm's own.
+///
+/// Unlike [`main`], this performs no process-level setup and never exits
+/// the process: terminal, tracing, panic-hook and error-report handling
+/// stay the host's, and errors come back as a [`miette::Report`] for the
+/// host to render under its own diagnostics. Shim dispatch is skipped,
+/// since an embedded engine is not a pnpm shim. The command runs on a
+/// dedicated large-stack thread, as it does under [`main`].
+pub fn run(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
+    run_on_big_stack(move || run_argv(argv, embedder))
+}
+
+fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
     let argv_with_alias = argv_with_alias_subcommand(argv);
     let child_argv = argv_with_alias.iter().skip(1).cloned().collect::<Vec<_>>();
     // `pnpm pm <cmd>` is stripped before every other pass, so they all see
@@ -104,10 +124,11 @@ fn run_cli() -> miette::Result<()> {
     let mut args = match parse_cli_args(command, argv.clone()) {
         Ok(args) => args,
         Err(err) if err.kind() == clap::error::ErrorKind::DisplayVersion => {
-            return print_version(&argv, &child_argv, &config_overrides);
+            return print_version(&argv, &child_argv, &config_overrides, embedder);
         }
         Err(err) => err.exit(),
     };
+    args.embedder = embedder;
     configure_cli_args(&mut args)?;
     if dispatched_to_pinned_pnpm(&args, &config_overrides, &child_argv)? {
         return Ok(());
@@ -138,9 +159,10 @@ fn print_version(
     argv: &[OsString],
     child_argv: &[OsString],
     config_overrides: &ConfigOverrides,
+    embedder: pnpm_config::Embedder,
 ) -> miette::Result<()> {
     if let Some(plan) =
-        cli_args::pre_command::pre_command_plan_for_version_flag(argv, config_overrides)?
+        cli_args::pre_command::pre_command_plan_for_version_flag(argv, config_overrides, embedder)?
         && block_on_runtime(
             "pacquet-pre-command",
             cli_args::pre_command::execute_plan(plan, child_argv),

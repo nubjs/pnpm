@@ -96,7 +96,7 @@ fn version_argv_reads_dir_auth_file_and_command_forms() {
 
     for case in cases {
         let argv = case.argv.iter().copied().map(OsString::from).collect::<Vec<_>>();
-        let input = SwitchInput::from_version_argv(&argv);
+        let input = SwitchInput::from_version_argv(&argv, pnpm_config::Embedder::PNPM);
 
         if let Some(dir) = case.dir {
             assert_eq!(input.dir, PathBuf::from(dir), "case: {}", case.name);
@@ -110,12 +110,15 @@ fn version_argv_reads_dir_auth_file_and_command_forms() {
         assert_eq!(input.command.as_deref(), case.command, "case: {}", case.name);
     }
 
-    let input = SwitchInput::from_version_argv(&[
-        OsString::from("pnpm"),
-        OsString::from("--state-dir"),
-        OsString::from("/tmp/state"),
-        OsString::from("--version"),
-    ]);
+    let input = SwitchInput::from_version_argv(
+        &[
+            OsString::from("pnpm"),
+            OsString::from("--state-dir"),
+            OsString::from("/tmp/state"),
+            OsString::from("--version"),
+        ],
+        pnpm_config::Embedder::PNPM,
+    );
     assert_eq!(input.state_dir.as_deref(), Some(Path::new("/tmp/state")));
 }
 
@@ -539,6 +542,7 @@ fn config_overrides(argv: &[&str]) -> ConfigOverrides {
 fn pre_command_input(dir: &Path) -> PreCommandInput {
     PreCommandInput {
         switch: SwitchInput {
+            embedder: pnpm_config::Embedder::PNPM,
             dir: dir.to_path_buf(),
             state_dir: None,
             npmrc_auth_file: None,

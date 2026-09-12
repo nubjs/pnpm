@@ -147,8 +147,12 @@ impl CliArgs {
         let Ok(dir) = dunce::canonicalize(&self.dir) else {
             return false;
         };
-        let loaded = Config { npmrc_auth_file: self.npmrc_auth_file.clone(), ..Config::default() }
-            .current::<Host>(&dir);
+        let loaded = Config {
+            npmrc_auth_file: self.npmrc_auth_file.clone(),
+            embedder: self.embedder,
+            ..Config::default()
+        }
+        .current::<Host>(&dir);
         let Ok(mut config) = loaded else {
             return false;
         };
@@ -223,7 +227,7 @@ impl CliArgs {
         // Load config anchored at `anchor`, reading `.npmrc` /
         // `pnpm-workspace.yaml` from there.
         let load_config = |anchor: &Path| -> miette::Result<&'static mut Config> {
-            seed_config(self.npmrc_auth_file.as_deref(), self.ignore_workspace)
+            seed_config(self.npmrc_auth_file.as_deref(), self.ignore_workspace, self.embedder)
                 .current::<Host>(anchor)
                 .map_err(miette::Report::new)
                 .wrap_err("load configuration")
@@ -236,7 +240,7 @@ impl CliArgs {
         // builds its `localPrefix` from `cliOptions.dir`, not `cwd`).
         let config = || load_config(&anchors.dir);
         let config_self_update = || -> miette::Result<&'static mut Config> {
-            seed_config(self.npmrc_auth_file.as_deref(), self.ignore_workspace)
+            seed_config(self.npmrc_auth_file.as_deref(), self.ignore_workspace, self.embedder)
                 .current_for_self_update::<Host>(&anchors.dir)
                 .map_err(miette::Report::new)
                 .wrap_err("load configuration")
@@ -456,10 +460,15 @@ impl RunSetup {
 /// turbofish `Host` explicitly so the dependency-injection plumbing is
 /// visible at the call site. See
 /// [pnpm/pacquet#339](https://github.com/pnpm/pacquet/issues/339).
-fn seed_config(npmrc_auth_file: Option<&Path>, ignore_workspace: bool) -> Config {
+fn seed_config(
+    npmrc_auth_file: Option<&Path>,
+    ignore_workspace: bool,
+    embedder: pnpm_config::Embedder,
+) -> Config {
     Config {
         npmrc_auth_file: npmrc_auth_file.map(Path::to_path_buf),
         ignore_workspace,
+        embedder,
         ..Config::default()
     }
 }

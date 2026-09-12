@@ -82,10 +82,11 @@ pub(crate) fn pre_command_plan(
 pub(crate) fn pre_command_plan_for_version_flag(
     argv: &[OsString],
     config_overrides: &ConfigOverrides,
+    embedder: pnpm_config::Embedder,
 ) -> miette::Result<Option<PreCommandPlan>> {
     pre_command_plan_from_input(
         &PreCommandInput {
-            switch: SwitchInput::from_version_argv(argv),
+            switch: SwitchInput::from_version_argv(argv, embedder),
             global: false,
             skip_pm_handling: false,
             check_runtimes: false,
@@ -298,11 +299,14 @@ fn load_pre_command_config(
     config_overrides: &ConfigOverrides,
     dir: &Path,
 ) -> miette::Result<Config> {
-    let mut config =
-        Config { npmrc_auth_file: switch.npmrc_auth_file.clone(), ..Config::default() }
-            .current::<Host>(dir)
-            .map_err(miette::Report::new)
-            .wrap_err("load configuration")?;
+    let mut config = Config {
+        npmrc_auth_file: switch.npmrc_auth_file.clone(),
+        embedder: switch.embedder,
+        ..Config::default()
+    }
+    .current::<Host>(dir)
+    .map_err(miette::Report::new)
+    .wrap_err("load configuration")?;
     config_overrides.apply(&mut config, dir);
     if let Some(color) = switch.color {
         config.color = color;
@@ -1229,6 +1233,8 @@ struct SwitchInput {
     /// The install-family options the pin record reads.
     pin_flags: PinFlags,
     color: Option<ColorMode>,
+    /// Naming profile of the host running the engine.
+    embedder: pnpm_config::Embedder,
 }
 
 impl SwitchInput {
@@ -1241,6 +1247,7 @@ impl SwitchInput {
             frozen_lockfile: frozen_lockfile_flag(&args.command),
             pin_flags: PinFlags::of(&args.command),
             color: args.color.or_else(|| args.no_color.then_some(ColorMode::Never)),
+            embedder: args.embedder,
         }
     }
 
@@ -1255,9 +1262,10 @@ impl SwitchInput {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    fn from_version_argv(argv: &[OsString]) -> Self {
+    fn from_version_argv(argv: &[OsString], embedder: pnpm_config::Embedder) -> Self {
         let global_options = ArgTable::top_level(super::grammar());
         let mut input = Self {
+            embedder,
             dir: Self::local_prefix_or_cwd(),
             state_dir: None,
             npmrc_auth_file: None,
