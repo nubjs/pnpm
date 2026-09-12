@@ -47,3 +47,18 @@ fn embedder_profile_renames_the_derived_virtual_store() {
     nub.anchor_default_module_dirs(&start_dir);
     assert_eq!(nub.virtual_store_dir, start_dir.join("node_modules").join(".store"));
 }
+
+/// The profile must survive the whole config cascade, since a host sets it on
+/// the seed config and every later read happens after `current`. If any step
+/// rebuilt the struct from defaults, the host's naming would be silently lost.
+#[test]
+fn profile_survives_the_config_cascade() {
+    let dir = tempfile::tempdir().expect("create a temp project dir");
+    let config = Config { embedder: NUB, ..Config::default() }
+        .current::<crate::Host>(dir.path())
+        .expect("load config");
+
+    assert_eq!(config.embedder, NUB);
+    assert_eq!(config.wanted_lockfile_name(), "nub.lock");
+    assert_eq!(config.virtual_store_dir, dir.path().join("node_modules").join(".store"));
+}
