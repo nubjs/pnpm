@@ -79,7 +79,7 @@ async fn workspace_manifests_satisfy(
         return false;
     };
     let Ok(workspace_projects) =
-        super::load_workspace_projects(workspace_root, workspace_manifest.as_ref())
+        super::load_workspace_projects(check.config, workspace_root, workspace_manifest.as_ref())
     else {
         return false;
     };

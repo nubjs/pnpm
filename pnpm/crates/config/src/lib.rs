@@ -3837,6 +3837,12 @@ impl Config {
                 settings
                     .as_ref()
                     .and_then(|settings| settings.packages.clone())
+                    .or_else(|| {
+                        self.embedder
+                            .workspaces_from_package_manifest
+                            .then(|| manifest_workspace_patterns(&base_dir))
+                            .flatten()
+                    })
                     .unwrap_or_else(|| vec![".".to_string()]),
             );
             if let Some(settings) = settings {
@@ -4066,10 +4072,23 @@ impl Config {
                 }
             }
         } else {
-            WorkspaceSettings::find_and_load(start_dir)?.map(|(path, settings)| {
-                let base_dir = path.parent().unwrap_or(start_dir).to_path_buf();
-                (base_dir, Some(settings))
-            })
+            WorkspaceSettings::find_and_load(start_dir)?
+                .map(|(path, settings)| {
+                    let base_dir = path.parent().unwrap_or(start_dir).to_path_buf();
+                    (base_dir, Some(settings))
+                })
+                // A host whose users declare the workspace in `package.json`
+                // has no yaml to find, so the manifest's own `workspaces`
+                // array marks the root instead. This runs only after the
+                // search above comes up empty, which is what keeps
+                // `pnpm-workspace.yaml` winning wherever both exist.
+                .or_else(|| {
+                    self.embedder
+                        .workspaces_from_package_manifest
+                        .then(|| find_manifest_workspace_dir(start_dir))
+                        .flatten()
+                        .map(|base_dir| (base_dir, None))
+                })
         };
         Ok(workspace_yaml)
     }
@@ -4276,6 +4295,37 @@ fn build_package_manager_bootstrap<Sys: EnvVar>(
         tls_by_uri: config.tls_by_uri,
         auth_headers: config.auth_headers,
     })
+}
+
+/// Workspace package patterns declared by the `workspaces` array of the
+/// `package.json` in `dir`, the way npm and Yarn spell them.
+///
+/// Only the array spelling counts, and only a non-empty one, which is the
+/// same shape pnpm's own `workspaces`-field warning recognizes. Best-effort
+/// like [`read_npmrc`]: an absent, unreadable or malformed manifest reads as
+/// "declares no workspace", and the install reports it properly later.
+///
+/// Read only for a host whose profile sets
+/// [`Embedder::workspaces_from_package_manifest`]; pnpm never calls this.
+fn manifest_workspace_patterns(dir: &Path) -> Option<Vec<String>> {
+    let text = fs::read_to_string(dir.join("package.json")).ok()?;
+    let manifest = pnpm_package_manifest::parse_manifest(&text).ok()?;
+    let patterns: Vec<String> = manifest
+        .get("workspaces")?
+        .as_array()?
+        .iter()
+        .filter_map(|pattern| pattern.as_str().map(str::to_string))
+        .collect();
+    (!patterns.is_empty()).then_some(patterns)
+}
+
+/// Nearest ancestor of `start_dir` whose `package.json` declares workspace
+/// projects, mirroring the upward walk `pnpm-workspace.yaml` gets.
+fn find_manifest_workspace_dir(start_dir: &Path) -> Option<PathBuf> {
+    start_dir
+        .ancestors()
+        .find(|dir| manifest_workspace_patterns(dir).is_some())
+        .map(Path::to_path_buf)
 }
 
 /// Read the text of the `.npmrc` in `dir`, returning `None` for anything

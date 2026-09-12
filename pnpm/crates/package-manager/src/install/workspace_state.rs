@@ -52,7 +52,7 @@ pub fn install_already_up_to_date(check: &UpToDateFastPathCheck<'_>) -> Option<U
     let (workspace_manifest, catalogs) =
         fast_path_workspace_context(check.config, workspace_dir_opt.as_deref())?;
     let workspace_projects =
-        load_workspace_projects(&workspace_root, workspace_manifest.as_ref()).ok()?;
+        load_workspace_projects(check.config, &workspace_root, workspace_manifest.as_ref()).ok()?;
     let project_manifests =
         build_project_manifests_list(check.manifest, workspace_projects.as_deref());
     // The lockfile the install wrote sits at its `lockfileDir`, which
@@ -210,7 +210,7 @@ fn check_discovered_deps(
     // install records this project alone.
     let Ok(workspace_projects) = config
         .shares_one_lockfile()
-        .then(|| load_workspace_projects(workspace_root, workspace_manifest))
+        .then(|| load_workspace_projects(config, workspace_root, workspace_manifest))
         .transpose()
     else {
         return cannot_check_deps();

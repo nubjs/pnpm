@@ -687,6 +687,7 @@ impl<'a> InstallWorkspace<'a> {
         // entirely; the override's `Vec` is used verbatim.
         let workspace_projects_are_overridden = owned.workspace_projects_override.is_some();
         let loaded_workspace_projects = discovered_workspace_projects(
+            install.config,
             options.selection.is_some(),
             owned.workspace_projects_override.take(),
             dirs.workspace_dir.as_deref().unwrap_or(&dirs.workspace_root),
@@ -1570,6 +1571,7 @@ fn catalog_context_present(
 /// supplied the list. A selection carries its own projects, so it walks
 /// nothing.
 fn discovered_workspace_projects(
+    config: &Config,
     has_selection: bool,
     workspace_projects_override: Option<Vec<pnpm_workspace::Project>>,
     workspace_dir: &Path,
@@ -1581,7 +1583,7 @@ fn discovered_workspace_projects(
     if let Some(projects) = workspace_projects_override {
         return Ok(Some(projects));
     }
-    load_workspace_projects(workspace_dir, workspace_manifest)
+    load_workspace_projects(config, workspace_dir, workspace_manifest)
         .map_err(InstallError::FindWorkspaceProjects)
 }
 

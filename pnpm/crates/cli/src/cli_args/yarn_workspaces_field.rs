@@ -6,6 +6,7 @@
 //! A warning names the field and the file that replaces it.
 
 use super::config_warnings::emit_config_warning;
+use pnpm_config::Embedder;
 use serde_json::Value;
 use std::path::Path;
 
@@ -13,11 +14,19 @@ use std::path::Path;
 /// outside a pnpm workspace. Inside one the field is redundant rather than
 /// misleading: `pnpm-workspace.yaml` already selects the projects, so
 /// `workspace_dir` being set silences the warning.
+///
+/// A host whose profile takes workspace membership from that very field
+/// supports it, so the advice would be wrong there and no warning is
+/// emitted.
 pub(crate) fn warn_unsupported_workspaces_field(
+    embedder: Embedder,
     manifest: Option<&Value>,
     workspace_dir: Option<&Path>,
 ) {
-    if workspace_dir.is_some() || !declares_yarn_workspaces(manifest) {
+    if embedder.workspaces_from_package_manifest
+        || workspace_dir.is_some()
+        || !declares_yarn_workspaces(manifest)
+    {
         return;
     }
     emit_config_warning(

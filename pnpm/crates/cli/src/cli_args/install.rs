@@ -1639,7 +1639,11 @@ fn report_up_to_date_install(
 ) {
     let root_manifest = read_root_manifest_json(config_root);
     warn_ignored_pnpm_manifest_fields(root_manifest.as_ref());
-    warn_unsupported_workspaces_field(root_manifest.as_ref(), config.workspace_dir.as_deref());
+    warn_unsupported_workspaces_field(
+        config.embedder,
+        root_manifest.as_ref(),
+        config.workspace_dir.as_deref(),
+    );
     warn_deprecated_override_version_references(config, emit);
     // The scope covers the same projects the full install path would
     // report; an up-to-date run says so too rather than going quiet

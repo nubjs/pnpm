@@ -21,14 +21,35 @@ use std::sync::Mutex;
 /// the fresh-resolve path iterates over, so the manifests are read
 /// from disk exactly once.
 pub(super) fn load_workspace_projects(
+    config: &Config,
     workspace_root: &std::path::Path,
     workspace_manifest: Option<&pnpm_workspace::WorkspaceManifest>,
 ) -> Result<Option<Vec<pnpm_workspace::Project>>, pnpm_workspace::FindWorkspaceProjectsError> {
-    let Some(manifest) = workspace_manifest else { return Ok(None) };
-    let opts = pnpm_workspace::FindWorkspaceProjectsOpts {
-        patterns: Some(pnpm_workspace::workspace_package_patterns(manifest)),
+    let Some(patterns) = workspace_package_patterns(config, workspace_manifest) else {
+        return Ok(None);
     };
+    let opts = pnpm_workspace::FindWorkspaceProjectsOpts { patterns: Some(patterns) };
     pnpm_workspace::find_workspace_projects(workspace_root, &opts).map(Some)
+}
+
+/// The patterns selecting the workspace's projects, or `None` when the
+/// directory is not a workspace root at all.
+///
+/// `pnpm-workspace.yaml` is the only source pnpm has, so without one there
+/// is no workspace. A host whose profile takes membership from the root
+/// `package.json` instead has no yaml to read, and the config already
+/// carries the patterns that manifest declared.
+fn workspace_package_patterns(
+    config: &Config,
+    workspace_manifest: Option<&pnpm_workspace::WorkspaceManifest>,
+) -> Option<Vec<String>> {
+    match workspace_manifest {
+        Some(manifest) => Some(pnpm_workspace::workspace_package_patterns(manifest)),
+        None if config.embedder.workspaces_from_package_manifest => {
+            config.workspace_package_patterns.clone()
+        }
+        None => None,
+    }
 }
 
 pub(super) struct ProjectLifecycleGraph<'a> {

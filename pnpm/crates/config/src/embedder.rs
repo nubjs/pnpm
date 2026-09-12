@@ -42,6 +42,19 @@ pub struct Embedder {
     /// against the installed runtime.
     pub manage_runtimes: bool,
 
+    /// Whether the root `package.json`'s `workspaces` array declares the
+    /// workspace's projects, the way npm and Yarn spell it.
+    ///
+    /// pnpm declares them in `pnpm-workspace.yaml` and warns when it finds
+    /// the manifest field instead, so this is off for pnpm. A host whose
+    /// users declare a workspace the npm way turns it on: an ancestor
+    /// manifest carrying a non-empty `workspaces` array then marks the
+    /// workspace root and supplies
+    /// [`Config::workspace_package_patterns`](crate::Config::workspace_package_patterns),
+    /// and the warning goes away. `pnpm-workspace.yaml` still wins wherever
+    /// both exist.
+    pub workspaces_from_package_manifest: bool,
+
     /// Basename of the lockfile the engine reads and writes, as returned by
     /// [`Config::wanted_lockfile_name`](crate::Config::wanted_lockfile_name)
     /// when no git-branch lockfile is in play.
@@ -61,6 +74,7 @@ impl Embedder {
         program_version: crate::defaults::PNPM_VERSION,
         manage_package_manager_versions: true,
         manage_runtimes: true,
+        workspaces_from_package_manifest: false,
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
         virtual_store_dirname: ".pnpm",
     };
