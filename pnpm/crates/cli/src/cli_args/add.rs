@@ -568,11 +568,12 @@ fn workspace_selectors(
 }
 
 /// Honor `--allow-build`: reject any package the root project explicitly
-/// disallows (`allowBuilds: false`), persist the allowed names to
-/// `settings_dir`'s `pnpm-workspace.yaml`, and enable them for this
-/// install. `settings_dir` is the workspace root, or the project
-/// directory outside a workspace. Mirrors pnpm's `add` handler; shared by
-/// the workspace and `--global` add paths.
+/// disallows (`allowBuilds: false`), persist the allowed names to the
+/// settings file that owns them — `settings_dir`'s `pnpm-workspace.yaml`,
+/// or whatever [`pnpm_config::Embedder::allow_builds_writer`] supplies —
+/// and enable them for this install. `settings_dir` is the workspace root,
+/// or the project directory outside a workspace. Mirrors pnpm's `add`
+/// handler; shared by the workspace and `--global` add paths.
 pub(crate) fn apply_allow_build(
     config: &mut Config,
     allow_build: &[String],
@@ -581,6 +582,7 @@ pub(crate) fn apply_allow_build(
     if allow_build.is_empty() {
         return Ok(());
     }
+    let allow_builds_writer = config.embedder.allow_builds_writer;
     let mut allow_build_map: Vec<(&str, bool)> = Vec::with_capacity(allow_build.len());
     let mut allowed_only: Vec<&str> = Vec::new();
     for pkg in allow_build {
@@ -603,7 +605,14 @@ pub(crate) fn apply_allow_build(
         }
         .into());
     }
-    set_allow_builds(settings_dir, allow_build_map.iter().copied()).into_diagnostic()?;
+    // Same seam `approve-builds` goes through, and for the same reason: a host
+    // that supplies its own writer records the decision where it will read it
+    // back, and the workspace manifest is left alone. Read off the profile
+    // before the loop below borrows `config` mutably; the profile is `Copy`.
+    match allow_builds_writer {
+        Some(write) => write(settings_dir, &allow_build_map).into_diagnostic()?,
+        None => set_allow_builds(settings_dir, allow_build_map.iter().copied()).into_diagnostic()?,
+    }
     for (name, is_allow) in allow_build_map {
         config.allow_builds.insert(name.to_string(), is_allow);
     }

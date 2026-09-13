@@ -248,3 +248,36 @@ fn workspace_selectors_reject_a_selector_without_a_package_name() {
         "{err}",
     );
 }
+
+/// A host that supplies its own `allowBuilds` writer records `--allow-build`
+/// through it, and the workspace manifest is left alone — the same seam
+/// `approve-builds` goes through. The tests above are the control: they run
+/// under pnpm's own profile, which supplies no writer, and do write the yaml.
+#[test]
+fn allow_build_goes_through_the_hosts_writer_and_leaves_the_yaml_alone() {
+    fn record(dir: &std::path::Path, entries: &[(&str, bool)]) -> std::io::Result<()> {
+        let body =
+            entries.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(",");
+        std::fs::write(dir.join("host-allow-builds"), body)
+    }
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut config = Config::default();
+    config.embedder.allow_builds_writer = Some(record);
+
+    apply_allow_build(&mut config, &["esbuild".to_string(), "!core-js".to_string()], dir.path())
+        .expect("allow-build applies");
+
+    assert_eq!(config.allow_builds.get("esbuild"), Some(&true), "enabled for this install");
+    assert_eq!(config.allow_builds.get("core-js"), Some(&false), "disabled for this install");
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("host-allow-builds"))
+            .expect("the host's writer received the decision"),
+        "esbuild=true,core-js=false"
+    );
+    assert!(
+        !dir.path().join("pnpm-workspace.yaml").exists(),
+        "the host's writer replaces the yaml write rather than adding to it"
+    );
+}
