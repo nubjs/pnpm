@@ -27,6 +27,10 @@ pub enum MinimumReleaseAgeError {
     )]
     StrictRequiresSave { settings_file: &'static str },
 
+    // Explicit, because derive_more forwards to a field's own `Display` only while the
+    // variant holds exactly one field. `settings_file` exists for the `help` below, so
+    // the message stays what it always was.
+    #[display("{message}")]
     #[diagnostic(
         code(ERR_PNPM_NO_MATURE_MATCHING_VERSION),
         help(
