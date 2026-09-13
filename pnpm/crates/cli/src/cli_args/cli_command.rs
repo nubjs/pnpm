@@ -159,7 +159,7 @@ pub struct CliArgs {
     )]
     pub store_dir: Option<PathBuf>,
 
-    /// Directory in which the package manager persists machine-local state.
+    /// Directory in which pnpm persists machine-local state.
     #[clap(long = "state-dir", value_name = "DIR", global = true, overrides_with = "state_dir")]
     pub state_dir: Option<PathBuf>,
 
@@ -206,7 +206,7 @@ pub struct CliArgs {
     )]
     pub reporter: ReporterType,
 
-    /// What level of logs to print. This is the universal `--loglevel`
+    /// What level of logs to print. Mirrors pnpm's universal `--loglevel`
     /// option: `silent` selects the silent reporter over any `--reporter`
     /// choice; the other levels cap the default reporter's output.
     #[clap(long, value_enum, global = true)]
@@ -619,7 +619,7 @@ pub enum CliCommand {
     /// Record a change intent: which packages a change affects, the bump
     /// type for each, and a summary that becomes the changelog entry.
     Change(ChangeArgs),
-    /// Apply the pending change intents (`version -r`).
+    /// Apply the pending change intents (`pnpm version -r`).
     Version(VersionArgs),
     /// Manage per-package release lanes.
     Lane(LaneArgs),
@@ -642,7 +642,7 @@ pub enum CliCommand {
     View(ViewArgs),
     /// Generate a Software Bill of Materials (SBOM).
     Sbom(SbomArgs),
-    /// Displays your registry username.
+    /// Displays your pnpm username.
     Whoami,
     /// Deprecates a version of a package in the registry.
     Deprecate(DeprecateArgs),
@@ -732,7 +732,7 @@ pub enum CliCommand {
     /// Manage context-aware shims for packages that are not installed
     /// globally, so a project decides which version runs.
     Shim(ShimArgs),
-    /// Print the directory where executables will be installed.
+    /// Print the directory where pnpm will install executables.
     Bin(BinArgs),
     /// Safely remove `node_modules` directories from the current project
     /// (or every workspace project) without following NTFS junctions into
@@ -817,15 +817,15 @@ pub enum CliCommand {
     /// single invocation, ignoring the "packageManager" and
     /// "devEngines.packageManager" fields of the project's manifest.
     With(WithArgs),
-    /// Not implemented. Use the npm CLI directly.
+    /// Not implemented in pnpm. Use the npm CLI directly.
     // Registered rather than left to the external-subcommand fallback so
     // it names npm instead of failing as a missing package script.
     Edit(NotImplementedArgs),
-    /// Not implemented. Use the npm CLI directly.
+    /// Not implemented in pnpm. Use the npm CLI directly.
     Profile(NotImplementedArgs),
-    /// Not implemented. Use the npm CLI directly.
+    /// Not implemented in pnpm. Use the npm CLI directly.
     Token(NotImplementedArgs),
-    /// Not implemented. Use the npm CLI directly.
+    /// Not implemented in pnpm. Use the npm CLI directly.
     Xmas(NotImplementedArgs),
     #[clap(external_subcommand)]
     External(Vec<String>),
