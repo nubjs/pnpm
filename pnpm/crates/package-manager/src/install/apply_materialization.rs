@@ -710,20 +710,14 @@ fn report_install_completion<Reporter: self::Reporter>(
         .global_pkg_dir
         .as_deref()
         .is_some_and(|global_pkg_dir| inputs.workspace_root.starts_with(global_pkg_dir));
-    // Leave the user a line to edit in `pnpm-workspace.yaml` for every
-    // build this install blocked, so approving one is an edit rather
-    // than recalling the `allowBuilds` shape. Written before the strict
-    // failure below, which is the very run whose message it answers.
-    // `--ignore-workspace` opts out: the run disowned the workspace
-    // manifest, so it must not write to one either. So does a host that
-    // keeps `allowBuilds` somewhere of its own: the line would be left in
-    // a file it never reads, and the file's mere existence may mean
-    // something to the host that this run cannot know.
-    if !inputs.ignored_builds.is_empty()
-        && !is_global_install
-        && !inputs.config.ignore_workspace
-        && inputs.config.embedder.allow_builds_writer.is_none()
-    {
+    // Written before the strict failure below, which is the very run whose
+    // message it answers.
+    if scaffolds_allow_builds(
+        !inputs.ignored_builds.is_empty(),
+        is_global_install,
+        inputs.config.ignore_workspace,
+        inputs.config.embedder.allow_builds_writer.is_some(),
+    ) {
         let allow_build_keys: BTreeSet<String> = inputs
             .ignored_builds
             .iter()
@@ -1048,4 +1042,40 @@ fn write_applied_workspace_state(
     tracing::info!(target: "pacquet::install::phase", phase = "apply.workspace_state", elapsed_ms = phase_start.elapsed().as_millis() as u64, "phase complete");
 
     Ok(())
+}
+
+/// Whether this install leaves the user a line to edit in
+/// `pnpm-workspace.yaml` for every build it blocked, so approving one is an
+/// edit rather than recalling the `allowBuilds` shape.
+///
+/// Three runs get no line. A global install records its ignored builds
+/// against the stable global packages dir rather than the throwaway group
+/// directory it ran in. `--ignore-workspace` disowned the workspace
+/// manifest, so the run must not write to one either. And a host keeping
+/// `allowBuilds` of its own never reads this file, so the line would be
+/// left where nobody looks and the file's mere existence may mean something
+/// to that host which this run cannot know.
+fn scaffolds_allow_builds(
+    blocked_any_build: bool,
+    is_global_install: bool,
+    ignore_workspace: bool,
+    host_owns_allow_builds: bool,
+) -> bool {
+    blocked_any_build && !is_global_install && !ignore_workspace && !host_owns_allow_builds
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scaffolds_allow_builds;
+
+    /// A blocked build earns the line, and each of the three reasons not to
+    /// write it takes it away on its own.
+    #[test]
+    fn only_a_blocked_build_in_a_manifest_the_run_owns_earns_a_line() {
+        assert!(scaffolds_allow_builds(true, false, false, false));
+        assert!(!scaffolds_allow_builds(false, false, false, false), "nothing was blocked");
+        assert!(!scaffolds_allow_builds(true, true, false, false), "a global install");
+        assert!(!scaffolds_allow_builds(true, false, true, false), "--ignore-workspace");
+        assert!(!scaffolds_allow_builds(true, false, false, true), "the host owns allowBuilds");
+    }
 }
