@@ -408,10 +408,7 @@ fn apply_existing_patch_file(
         .get(&exact_key)
         .or_else(|| target.apply_to_all.then(|| patched_dependencies.get(&target.alias)).flatten());
     let Some(patch_file) = patch_file else { return Ok(()) };
-    let base_dir = config
-        .workspace_dir
-        .as_deref()
-        .unwrap_or_else(|| config.modules_dir.parent().unwrap_or_else(|| Path::new(".")));
+    let base_dir = config.patches_base_dir();
     let patch_file_path = checked_existing_patch_file_path(
         base_dir,
         config.patches_dir.as_deref().unwrap_or("patches"),

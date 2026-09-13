@@ -277,6 +277,35 @@ fn host_settings_carry_the_catalogs_a_workspace_manifest_would() {
     assert_eq!(config.catalogs, None);
 }
 
+/// Settings a host supplies can declare `patchedDependencies` for a project
+/// with no workspace. Their paths resolve against the project root, so the
+/// patches are hashed rather than dropped for want of a workspace directory.
+#[test]
+fn host_patched_dependencies_resolve_without_a_workspace() {
+    let dir = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(dir.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
+        .expect("write the manifest");
+    std::fs::create_dir(dir.path().join("patches")).expect("create the patches dir");
+    std::fs::write(dir.path().join("patches").join("left-pad.patch"), "patch body\n")
+        .expect("write the patch");
+
+    let embedder = Embedder {
+        workspace_settings: Some(host_settings(serde_json::json!({
+            "patchedDependencies": { "left-pad@1.3.0": "patches/left-pad.patch" },
+        }))),
+        ..NUB
+    };
+    let config = Config { embedder, ..Config::default() }
+        .current::<crate::Host>(dir.path())
+        .expect("load config");
+    assert_eq!(config.workspace_dir, None);
+    let hashes = config
+        .patched_dependency_hashes()
+        .expect("hash the configured patch")
+        .expect("the host patch is configured");
+    assert!(hashes.contains_key("left-pad@1.3.0"), "{hashes:?}");
+}
+
 /// With no pnpm configuration read there is no default pnpmfile to look for
 /// either. `None` is what sends the hook finder looking for `.pnpmfile.cjs`;
 /// an empty list runs none.

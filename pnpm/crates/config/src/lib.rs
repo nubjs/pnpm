@@ -1915,13 +1915,14 @@ pub struct Config {
     /// later install-time code (notably [`resolve_and_group`] for
     /// `patchedDependencies`) can resolve relative paths against the
     /// same dir pnpm does. `None` when no `pnpm-workspace.yaml` exists
-    /// anywhere up the tree — in that case there are no patches /
-    /// allowBuilds settings to resolve either.
+    /// anywhere up the tree, including for a project whose embedder profile
+    /// supplies its settings without a workspace; patches then resolve
+    /// through [`Config::patches_base_dir`].
     pub workspace_dir: Option<PathBuf>,
 
     /// Raw `patchedDependencies` from `pnpm-workspace.yaml`: keys are
     /// `name[@version]`, values are patch file paths (relative to
-    /// `workspace_dir` or absolute). Consumed by
+    /// [`Config::patches_base_dir`] or absolute). Consumed by
     /// [`Config::resolved_patched_dependencies`] which performs the
     /// path resolution and SHA-256 hashing.
     ///
@@ -2950,10 +2951,10 @@ impl Config {
 
     /// Resolve relative patch file paths in
     /// [`Config::patched_dependencies`] against
-    /// [`Config::workspace_dir`], compute SHA-256 hashes, and bucket
+    /// [`Config::patches_base_dir`], compute SHA-256 hashes, and bucket
     /// the entries into a [`PatchGroupRecord`].
     ///
-    /// Resolves each configured patch path against the workspace dir,
+    /// Resolves each configured patch path against that directory,
     /// then hashes the files.
     ///
     /// Returns `Ok(None)` when either field is unset (no yaml
@@ -3351,6 +3352,18 @@ impl Config {
         }
     }
 
+    /// The directory relative `patchedDependencies` paths resolve against.
+    ///
+    /// That is the workspace root, where `pnpm-workspace.yaml` declares them.
+    /// Settings an embedder profile supplies can declare them for a project
+    /// with no workspace, and those resolve against the project root, the
+    /// fallback `pnpm patch` already uses.
+    pub fn patches_base_dir(&self) -> &Path {
+        self.workspace_dir
+            .as_deref()
+            .unwrap_or_else(|| self.modules_dir.parent().unwrap_or_else(|| Path::new(".")))
+    }
+
     pub fn resolved_patched_dependencies(
         &self,
     ) -> Result<Option<PatchGroupRecord>, ResolvePatchedDependenciesError> {
@@ -3360,16 +3373,16 @@ impl Config {
             }))?;
             return Ok((!groups.is_empty()).then_some(groups));
         }
-        let (Some(workspace_dir), Some(raw)) = (&self.workspace_dir, &self.patched_dependencies)
-        else {
+        let Some(raw) = &self.patched_dependencies else {
             return Ok(None);
         };
-        resolve_and_group(workspace_dir, raw)
+        let base_dir = self.patches_base_dir();
+        resolve_and_group(base_dir, raw)
     }
 
     /// Resolve relative patch file paths in
     /// [`Config::patched_dependencies`] against
-    /// [`Config::workspace_dir`] and hash each file, producing the
+    /// [`Config::patches_base_dir`] and hash each file, producing the
     /// `patchedDependencies` map the lockfile records: each configured
     /// key mapped to its patch file's SHA-256 hex digest.
     ///
@@ -3400,17 +3413,17 @@ impl Config {
         if let Some(hashes) = self.patched_dependency_hashes_override.as_ref() {
             return Ok((!hashes.is_empty()).then(|| hashes.clone()));
         }
-        let (Some(workspace_dir), Some(raw)) = (&self.workspace_dir, &self.patched_dependencies)
-        else {
+        let Some(raw) = &self.patched_dependencies else {
             return Ok(None);
         };
+        let base_dir = self.patches_base_dir();
         let mut hashes = IndexMap::with_capacity(raw.len());
         for (key, rel_or_abs) in raw {
             let candidate = Path::new(rel_or_abs);
             let path = if candidate.is_absolute() {
                 candidate.to_path_buf()
             } else {
-                workspace_dir.join(candidate)
+                base_dir.join(candidate)
             };
             hashes.insert(key.clone(), create_hex_hash_from_file(&path)?);
         }
