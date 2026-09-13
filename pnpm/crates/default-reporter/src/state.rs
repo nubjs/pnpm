@@ -33,6 +33,7 @@ use crate::{
         contains_path, cut_line, format_prefix, format_prefix_no_trim, highlight_last_folder,
         normalize, pretty_bytes, pretty_ms, pretty_ms_compact, relative, visible_width, zoom_out,
     },
+    program_name,
 };
 
 /// What [`ReporterState::handle`] asks the sink to do after folding one event.
@@ -1150,9 +1151,11 @@ impl ReporterState {
             return;
         }
         let list = log.package_names.join(", ");
-        let instruction = self.options.ignored_builds_instruction_text.as_deref().unwrap_or(
-            r#"Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts."#,
-        );
+        let instruction = self
+            .options
+            .ignored_builds_instruction_text
+            .clone()
+            .unwrap_or_else(|| approve_builds_instruction(program_name()));
         self.push_block(format!("Ignored build scripts: {list}.\n{instruction}"));
     }
 
@@ -1406,9 +1409,7 @@ impl ReporterState {
         if std::mem::replace(&mut self.reported_peer_dependency_issues, true) {
             return;
         }
-        self.push_warning(
-            r#"Issues with peer dependencies found. Run "pnpm peers check" to list them."#,
-        );
+        self.push_warning(&peers_check_warning(program_name()));
     }
 
     /// A warning, honoring pnpm's "only show the first
@@ -1528,6 +1529,23 @@ fn cached_verdict(verified_at: Option<&str>, now: DateTime<Utc>) -> String {
         }
         None => "previously verified".to_string(),
     }
+}
+
+/// Advice for an install that skipped build scripts.
+///
+/// `program` is the name the engine is running under: a host that embeds
+/// it serves `approve-builds` too, so the advice has to name the program
+/// the user actually ran.
+fn approve_builds_instruction(program: &str) -> String {
+    format!(
+        r#"Run "{program} approve-builds" to pick which dependencies should be allowed to run scripts."#
+    )
+}
+
+/// The one line an install with peer dependency issues warns with, naming
+/// the command that prints them under [`program`](approve_builds_instruction).
+fn peers_check_warning(program: &str) -> String {
+    format!(r#"Issues with peer dependencies found. Run "{program} peers check" to list them."#)
 }
 
 /// Where the running pnpm came from, which is what decides how to update

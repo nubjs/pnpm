@@ -39,3 +39,18 @@ fn only_a_pnpm_home_install_is_told_to_self_update() {
     assert_eq!(update_command(PnpmInstallSource::Corepack), standalone_install_command());
     assert_eq!(update_command(PnpmInstallSource::Elsewhere), standalone_install_command());
 }
+
+/// Advice that names a command has to name the program the user ran, or a
+/// host embedding the engine under its own name tells its users to run a
+/// command they do not have.
+#[test]
+fn advice_names_the_running_program() {
+    assert_eq!(
+        super::approve_builds_instruction("nub"),
+        r#"Run "nub approve-builds" to pick which dependencies should be allowed to run scripts."#
+    );
+    assert_eq!(
+        super::peers_check_warning("nub"),
+        r#"Issues with peer dependencies found. Run "nub peers check" to list them."#
+    );
+}
