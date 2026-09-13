@@ -121,12 +121,32 @@ pub struct Embedder {
     /// its scripts may run, and merges them into whatever it already had;
     /// nothing scaffolds the engine's own manifest.
     pub allow_builds_writer: Option<AllowBuildsWriter>,
+
+    /// An observer notified of every package this run extracts into the
+    /// store, for a host that inspects package contents — pnpm registers
+    /// none. Supplied as a function rather than as the observer itself so
+    /// the profile stays plain data: an `Arc` on it would cost the `Copy`
+    /// that makes passing it around free. Asked once per configuration.
+    pub extract_observer: Option<ExtractObserverProvider>,
+
+    /// The policy deciding which packages this host keeps out of the
+    /// shared virtual store, supplied the same way and for the same
+    /// reason. pnpm sets none, and then every package is shared.
+    pub materialize_policy: Option<MaterializePolicyProvider>,
 }
 
 /// Records a set of approve-builds decisions for a host that keeps them
 /// outside pnpm's workspace manifest. See
 /// [`Embedder::allow_builds_writer`].
 pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::Result<()>;
+
+/// Supplies the observer a host wants notified of each extraction. See
+/// [`Embedder::extract_observer`].
+pub type ExtractObserverProvider = fn() -> std::sync::Arc<dyn pnpm_store_dir::ExtractObserver>;
+
+/// Supplies the policy deciding what a host keeps out of the shared virtual
+/// store. See [`Embedder::materialize_policy`].
+pub type MaterializePolicyProvider = fn() -> std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>;
 
 /// Answers with the settings a host resolves for the directory a
 /// configuration is being built for. See [`Embedder::workspace_settings`].
@@ -147,6 +167,8 @@ impl Embedder {
         workspace_settings: None,
         compat_package_extensions: None,
         allow_builds_writer: None,
+        extract_observer: None,
+        materialize_policy: None,
     };
 }
 

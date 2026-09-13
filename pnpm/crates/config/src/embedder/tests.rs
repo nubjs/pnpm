@@ -16,6 +16,8 @@ const NUB: Embedder = Embedder {
     workspace_settings: None,
     compat_package_extensions: None,
     allow_builds_writer: None,
+    extract_observer: None,
+    materialize_policy: None,
 };
 
 #[test]

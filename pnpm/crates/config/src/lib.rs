@@ -3547,6 +3547,9 @@ impl Config {
             )?;
         }
 
+        self.extract_observer = self.embedder.extract_observer.map(|provide| provide());
+        self.materialize_policy = self.embedder.materialize_policy.map(|provide| provide());
+
         // Apply `_auth` routes after workspace yaml (so they win over
         // repo-controlled registries) but before `PNPM_CONFIG_*` (so an
         // explicit `pnpm_config_registry` / `--registry` still wins) —
