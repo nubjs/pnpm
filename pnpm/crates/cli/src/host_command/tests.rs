@@ -51,3 +51,21 @@ fn a_command_line_naming_no_command_answers_none() {
     assert_eq!(name_of(&["pnpm", "build"]), None);
     assert_eq!(name_of(&["pnpm", "--filter", "app"]), None);
 }
+
+/// A host writes options of its own before the command. Reading one as a
+/// flag would take its value for the command, so an option this grammar
+/// does not declare ends the answer instead: `--require add script.js`
+/// preloads a module and is not an `add`.
+#[test]
+fn an_option_this_grammar_does_not_declare_names_nothing() {
+    assert_eq!(name_of(&["nub", "--require", "add", "script.js"]), None);
+    assert_eq!(name_of(&["nub", "--experimental-loader", "install", "app.js"]), None);
+    assert_eq!(name_of(&["nub", "--", "install"]), None);
+}
+
+/// `--silent` is a shorthand the engine expands before it parses, so a
+/// host that passes one through still gets an answer.
+#[test]
+fn a_universal_shorthand_does_not_hide_the_command() {
+    assert_eq!(name_of(&["pnpm", "--silent", "install"]).as_deref(), Some("install"));
+}
