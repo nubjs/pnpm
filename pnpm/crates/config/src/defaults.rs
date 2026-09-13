@@ -373,6 +373,7 @@ pub fn default_fetch_min_speed_ki_bps() -> u64 {
 /// Node runtime, so the `node/` segment is the same `?` placeholder used
 /// for `npm/`. Platform and arch use Node's naming via
 /// [`pnpm_detect_libc::host_platform`] / [`pnpm_detect_libc::host_arch`].
+#[must_use]
 pub fn default_user_agent() -> String {
     format!(
         "pnpm/{PNPM_VERSION} npm/? node/? {} {}",
