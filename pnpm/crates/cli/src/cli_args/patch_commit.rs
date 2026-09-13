@@ -42,6 +42,18 @@ pub(crate) enum PatchCommitError {
     )]
     InvalidPatchDir { patch_dir: PathBuf },
 
+    /// A patch only applies because `patchedDependencies` names it, so under a
+    /// host whose settings come from its own configuration there is nowhere to
+    /// record it that the next install would read back.
+    #[display(
+        "The patch cannot be recorded for you, because {settings_file} is not this program's to write."
+    )]
+    #[diagnostic(
+        code(ERR_PNPM_PATCHED_DEPENDENCIES_NOT_WRITABLE),
+        help("Add this to patchedDependencies in {settings_file} by hand, then install:\n  {entry}")
+    )]
+    PatchedDependenciesNotWritable { settings_file: &'static str, entry: String },
+
     #[display("Missing package manifest field `{field}` in {}", path.display())]
     #[diagnostic(code(ERR_PNPM_PATCH_COMMIT_MISSING_MANIFEST_FIELD))]
     MissingManifestField { path: PathBuf, field: &'static str },
@@ -165,15 +177,26 @@ impl PatchCommitArgs {
                 .or(state.config.patches_dir.as_deref())
                 .unwrap_or("patches"),
         );
+        let patch_key = if apply_to_all { name.to_string() } else { format!("{name}@{version}") };
+        let patch_file_name = format!("{}.patch", patch_key.replace('/', "__"));
+
+        // Before anything is created on disk. A patch file the settings file
+        // never declares is inert — the next install would not apply it — so
+        // writing one and then failing to record it would leave the project
+        // looking patched when it is not.
+        if !state.config.embedder.writes_settings_file {
+            return Err(PatchCommitError::PatchedDependenciesNotWritable {
+                settings_file: state.config.embedder.settings_file_display_name,
+                entry: format!("{patch_key}: {patches_dir_name}/{patch_file_name}"),
+            });
+        }
+
         let patches_dir = workspace_dir.join(path_from_forward_slash(&patches_dir_name));
         fs::create_dir_all(&patches_dir).map_err(|source| PatchCommitError::CreatePatchesDir {
             path: patches_dir.clone(),
             source,
         })?;
         let patch_file_context = PatchFileWriteContext::new(&workspace_dir, &patches_dir_name)?;
-
-        let patch_key = if apply_to_all { name.to_string() } else { format!("{name}@{version}") };
-        let patch_file_name = format!("{}.patch", patch_key.replace('/', "__"));
         let patch_file_path = patch_file_context.patch_file_path(&patch_file_name)?;
         write_patch_file_atomically(&patch_file_path, patch_content.as_bytes()).map_err(
             |source| PatchCommitError::WritePatch { path: patch_file_path.clone(), source },

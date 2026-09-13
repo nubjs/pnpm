@@ -513,7 +513,14 @@ fn prune_ignored_advisories(
     // Persist even when nothing was removed: `retained` may still differ
     // from the configured list (deduplicated or case-normalized), and the
     // file should always reflect the canonical form.
-    if &prune.retained != configured_ghsas {
+    //
+    // The one write in this module that SKIPS rather than refusing under a
+    // host that owns its settings file. Its siblings in `fix.rs` each record
+    // a decision the user just made, so dropping one silently would lose it;
+    // this only rewrites a list the host already has in its own file, in a
+    // canonical form the host would have to produce for itself anyway.
+    // Nothing reports this write, so skipping it claims nothing false.
+    if &prune.retained != configured_ghsas && config.embedder.writes_settings_file {
         pnpm_workspace_manifest_writer::set_audit_ignore_ghsas(settings_dir, &prune.retained)
             .map_err(|err| {
                 miette::Report::new(err)

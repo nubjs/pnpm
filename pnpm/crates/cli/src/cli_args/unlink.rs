@@ -4,6 +4,23 @@ use pnpm_config::Config;
 use pnpm_workspace_manifest_writer::remove_overrides;
 use std::path::Path;
 
+/// Removing a `link:` override is the whole of `unlink`, so under a host whose
+/// overrides come from its own configuration there is nothing this command can
+/// do: dropping them from memory alone would report success and then re-link on
+/// the next install.
+#[derive(Debug, derive_more::Display, derive_more::Error, miette::Diagnostic)]
+#[display(
+    "Linked dependencies cannot be removed for you, because {settings_file} is not this program's to write."
+)]
+#[diagnostic(
+    code(ERR_PNPM_UNLINK_OVERRIDES_NOT_WRITABLE),
+    help("Remove these from overrides in {settings_file} by hand, then install:\n  {selectors}")
+)]
+pub struct UnlinkOverridesNotWritable {
+    settings_file: &'static str,
+    selectors: String,
+}
+
 /// Remove the link created by `pnpm link` and reinstall the package as
 /// declared in `package.json`.
 ///
@@ -37,6 +54,9 @@ impl UnlinkArgs {
         config: &mut Config,
         manifest_path: &Path,
     ) -> miette::Result<bool> {
+        // Read off the profile before `overrides` takes a mutable borrow of
+        // `config`; the profile is `Copy`, so this costs nothing.
+        let embedder = config.embedder;
         let Some(overrides) = config.overrides.as_mut() else {
             println!("Nothing to unlink");
             return Ok(false);
@@ -51,6 +71,16 @@ impl UnlinkArgs {
             })
             .map(|(selector, _)| selector.clone())
             .collect();
+
+        // Before the in-memory removal, so a refusal leaves the run's own
+        // config consistent with what is on disk.
+        if !removed.is_empty() && !embedder.writes_settings_file {
+            return Err(UnlinkOverridesNotWritable {
+                settings_file: embedder.settings_file_display_name,
+                selectors: removed.join("\n  "),
+            }
+            .into());
+        }
 
         for selector in &removed {
             overrides.shift_remove(selector);
@@ -68,5 +98,68 @@ impl UnlinkArgs {
         }
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UnlinkArgs, UnlinkOverridesNotWritable};
+    use indexmap::IndexMap;
+    use pnpm_config::Config;
+
+    fn config_with_link_override() -> Config {
+        let mut overrides = IndexMap::new();
+        overrides.insert("sib".to_string(), "link:../sib".to_string());
+        Config { overrides: Some(overrides), ..Config::default() }
+    }
+
+    /// pnpm's own profile writes the manifest, so the override is stripped
+    /// from memory and from disk as before. This is the control for the test
+    /// below: without it, a refusal that fired unconditionally would look
+    /// like a pass.
+    #[test]
+    fn a_host_that_writes_the_settings_file_strips_the_override() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut config = config_with_link_override();
+        config.workspace_dir = Some(dir.path().to_path_buf());
+
+        let reinstall = UnlinkArgs { package_names: Vec::new(), ignore_pnpmfile: false }
+            .strip_link_overrides(&mut config, &dir.path().join("package.json"))
+            .expect("unlink applies under pnpm's own profile");
+
+        assert!(reinstall, "the caller reinstalls after a successful unlink");
+        assert!(
+            config.overrides.as_ref().is_none_or(|o| !o.contains_key("sib")),
+            "the link: override is gone from the run's own config"
+        );
+    }
+
+    /// Under a host whose overrides come from its own configuration the
+    /// removal cannot be persisted, so the command refuses instead of
+    /// reporting a success the next install would undo.
+    #[test]
+    fn a_host_that_writes_no_settings_file_refuses_rather_than_report_a_removal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut config = config_with_link_override();
+        config.workspace_dir = Some(dir.path().to_path_buf());
+        config.embedder.writes_settings_file = false;
+        config.embedder.settings_file_display_name = "nub.jsonc";
+
+        let err = UnlinkArgs { package_names: Vec::new(), ignore_pnpmfile: false }
+            .strip_link_overrides(&mut config, &dir.path().join("package.json"))
+            .expect_err("a host that writes no settings file cannot unlink");
+
+        assert!(
+            err.downcast_ref::<UnlinkOverridesNotWritable>().is_some(),
+            "refused for the right reason, got: {err:?}"
+        );
+        assert!(
+            config.overrides.as_ref().is_some_and(|o| o.contains_key("sib")),
+            "the run's own config still matches what is on disk"
+        );
+        assert!(
+            err.to_string().contains("nub.jsonc"),
+            "the refusal names the host's settings file, got: {err}"
+        );
     }
 }

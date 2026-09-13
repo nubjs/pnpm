@@ -30,6 +30,17 @@ pub enum PatchRemoveError {
     #[diagnostic(code(ERR_PNPM_PATCH_REMOVE_CANCELED))]
     Canceled,
 
+    /// Dropping the `patchedDependencies` entry is the whole of
+    /// `patch-remove`, so a host that records those itself has to do it.
+    #[display(
+        "The patch cannot be removed for you, because {settings_file} is not this program's to write."
+    )]
+    #[diagnostic(
+        code(ERR_PNPM_PATCHED_DEPENDENCIES_NOT_WRITABLE),
+        help("Remove these from patchedDependencies in {settings_file} by hand, then install:\n  {entries}")
+    )]
+    PatchedDependenciesNotWritable { settings_file: &'static str, entries: String },
+
     #[display("Patch \"{patch}\" not found in patched dependencies")]
     #[diagnostic(code(ERR_PNPM_PATCH_NOT_FOUND))]
     PatchNotFound { patch: String },
@@ -84,6 +95,16 @@ impl PatchRemoveArgs {
             if !patched_dependencies.contains_key(patch) {
                 return Err(PatchRemoveError::PatchNotFound { patch: patch.clone() });
             }
+        }
+
+        // Before the patch files are unlinked. Deleting them and then failing
+        // to drop the declaration would leave `patchedDependencies` naming
+        // files that no longer exist, which fails every later install.
+        if !state.config.embedder.writes_settings_file {
+            return Err(PatchRemoveError::PatchedDependenciesNotWritable {
+                settings_file: state.config.embedder.settings_file_display_name,
+                entries: patches_to_remove.join("\n  "),
+            });
         }
 
         let lockfile_dir = state.config.workspace_dir.clone().unwrap_or_else(|| dir.to_path_buf());

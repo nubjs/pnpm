@@ -32,6 +32,19 @@ pub enum LinkError {
         #[error(not(source))]
         name: String,
     },
+
+    /// A link is only a link because an override points the dependency at the
+    /// local directory, and that override has to survive the command. Under a
+    /// host whose overrides come from its own configuration there is nowhere
+    /// to record it that the next install would read back, so this refuses
+    /// before touching `package.json` rather than leaving a dependency
+    /// resolving to the registry copy.
+    #[display("Linked dependencies cannot be recorded for you, because {settings_file} is not this program's to write.")]
+    #[diagnostic(
+        code(ERR_PNPM_LINK_OVERRIDES_NOT_WRITABLE),
+        help("Add these to overrides in {settings_file} by hand, then install:\n  {specifiers}")
+    )]
+    OverridesNotWritable { settings_file: &'static str, specifiers: String },
 }
 
 const DEPENDENCY_FIELDS: [&str; 3] = ["optionalDependencies", "dependencies", "devDependencies"];
@@ -100,6 +113,23 @@ impl LinkArgs {
                     .wrap_err("adding linked dependency to package.json")?;
             }
             new_overrides.insert(package_name, link_spec(&root_dir, &target_dir));
+        }
+
+        // Before `save`, not after it: everything above this point is an
+        // in-memory edit, so refusing here leaves the project exactly as the
+        // command found it. Saving first would add a dependency whose
+        // override never lands, which resolves to the registry copy — the
+        // opposite of what was asked for.
+        if !config.embedder.writes_settings_file {
+            return Err(LinkError::OverridesNotWritable {
+                settings_file: config.embedder.settings_file_display_name,
+                specifiers: new_overrides
+                    .iter()
+                    .map(|(selector, specifier)| format!("{selector}: {specifier}"))
+                    .collect::<Vec<_>>()
+                    .join("\n  "),
+            }
+            .into());
         }
 
         manifest.save().wrap_err("saving package.json with linked dependencies")?;

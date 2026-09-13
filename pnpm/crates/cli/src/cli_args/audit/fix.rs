@@ -10,6 +10,30 @@ use super::{
     severity_name, severity_number,
 };
 
+/// Every outcome `audit --fix` and `audit --ignore` can produce is an edit to
+/// the settings file — an override, an exclude, an ignored advisory — so under
+/// a host that resolves its own configuration none of them can be applied. The
+/// command reports what to write rather than claiming a fix that did not land:
+/// an audit that says it fixed something and did not is worse than one that
+/// says it cannot.
+///
+/// Shared by all three paths instead of one variant each, because the reason
+/// is identical and only the field being written differs.
+#[derive(Debug, derive_more::Display, derive_more::Error, miette::Diagnostic)]
+#[display(
+    "{what} cannot be recorded for you, because {settings_file} is not this program's to write."
+)]
+#[diagnostic(
+    code(ERR_PNPM_AUDIT_SETTINGS_NOT_WRITABLE),
+    help("Add these under {field} in {settings_file} by hand:\n  {entries}")
+)]
+pub(crate) struct AuditSettingsNotWritable {
+    what: &'static str,
+    field: &'static str,
+    settings_file: &'static str,
+    entries: String,
+}
+
 /// Filter `report`'s advisories down to the set both fix methods and the
 /// interactive prompt operate on: severity at or above `audit_level` and
 /// not suppressed by `auditConfig.ignoreGhsas`. Mirrors pnpm's
@@ -112,14 +136,29 @@ pub(crate) async fn fix_override(
     if overrides.is_empty() {
         return Ok("No fixes were made".to_string());
     }
+    let settings_file = config.embedder.settings_file_display_name;
+    if !config.embedder.writes_settings_file {
+        return Err(AuditSettingsNotWritable {
+            what: "Overrides",
+            field: "overrides",
+            settings_file,
+            entries: overrides
+                .iter()
+                .map(|(key, value)| format!("{key}: {value}"))
+                .collect::<Vec<_>>()
+                .join("\n  "),
+        }
+        .into());
+    }
     let entries = overrides.iter().map(|(key, value)| (key.as_str(), value.as_str()));
     pnpm_workspace_manifest_writer::set_overrides(settings_dir, entries).map_err(|err| {
-        miette::Report::new(err).wrap_err("write overrides to pnpm-workspace.yaml")
+        miette::Report::new(err).wrap_err(format!("write overrides to {settings_file}"))
     })?;
     let json = serde_json::to_string_pretty(&overrides).into_diagnostic()?;
     let mut output = format!(
-        "{} overrides were added to pnpm-workspace.yaml to fix vulnerabilities.\nRun \"pnpm install\" to apply the fixes.\n\nThe added overrides:\n{json}",
+        "{} overrides were added to {settings_file} to fix vulnerabilities.\nRun \"{} install\" to apply the fixes.\n\nThe added overrides:\n{json}",
         overrides.len(),
+        config.embedder.program_name,
     );
     if let Some(minimum_release_age) = config.resolved_minimum_release_age() {
         let added =
@@ -344,10 +383,21 @@ pub(crate) fn ignore_vulnerabilities(
         }
     }
 
+    let settings_file = config.embedder.settings_file_display_name;
+    if !config.embedder.writes_settings_file {
+        return Err(AuditSettingsNotWritable {
+            what: "Ignored advisories",
+            field: "auditConfig.ignoreGhsas",
+            settings_file,
+            entries: new_ignores.join("\n  "),
+        }
+        .into());
+    }
+
     pnpm_workspace_manifest_writer::set_audit_ignore_ghsas(settings_dir, &ordered).map_err(
         |err| {
             miette::Report::new(err)
-                .wrap_err("write auditConfig.ignoreGhsas to pnpm-workspace.yaml")
+                .wrap_err(format!("write auditConfig.ignoreGhsas to {settings_file}"))
         },
     )?;
 
@@ -546,6 +596,15 @@ fn persist_age_excludes(
     let added =
         resolve_minimum_release_age_excludes(advisories, publish_infos, minimum_release_age)?;
     if !added.is_empty() {
+        if !state.config.embedder.writes_settings_file {
+            return Err(AuditSettingsNotWritable {
+                what: "Maturity-gate excludes",
+                field: "minimumReleaseAgeExclude",
+                settings_file: state.config.embedder.settings_file_display_name,
+                entries: added.join("\n  "),
+            }
+            .into());
+        }
         write_age_excludes(settings_dir, &added)?;
     }
     Ok(added)
