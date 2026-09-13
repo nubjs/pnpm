@@ -84,7 +84,7 @@ pub struct Embedder {
     /// either way, as are command-line options.
     pub reads_pnpm_config: bool,
 
-    /// Settings the host resolved from its own configuration, applied where
+    /// Settings the host resolves from its own configuration, applied where
     /// `pnpm-workspace.yaml` sits in the cascade: above the `.npmrc` chain and
     /// the global `config.yaml`, below `PNPM_CONFIG_*`. They pass through the
     /// same filtering as the workspace yaml, since a host's project
@@ -92,7 +92,12 @@ pub struct Embedder {
     /// in them resolve against the workspace root, or the project directory
     /// when there is no workspace. Supplying them does not make a directory a
     /// workspace.
-    pub workspace_settings: Option<&'static crate::WorkspaceSettings>,
+    ///
+    /// Asked again for each configuration the engine builds, not resolved
+    /// once: a command that writes the host's own configuration and then
+    /// reloads — `approve-builds` recording an answer and rebuilding on it —
+    /// must see what it just wrote, exactly as pnpm re-reads its yaml.
+    pub workspace_settings: Option<WorkspaceSettingsProvider>,
 
     /// Compatibility rules the host adds beneath the engine's own database of
     /// `@yarnpkg/extensions` and pnpm's additions. They repair published
@@ -122,6 +127,11 @@ pub struct Embedder {
 /// outside pnpm's workspace manifest. See
 /// [`Embedder::allow_builds_writer`].
 pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::Result<()>;
+
+/// Answers with the settings a host resolves for the directory a
+/// configuration is being built for. See [`Embedder::workspace_settings`].
+pub type WorkspaceSettingsProvider =
+    fn(&std::path::Path) -> Option<&'static crate::WorkspaceSettings>;
 
 impl Embedder {
     /// pnpm's own names. The default, and what standalone pnpm always uses.

@@ -3535,7 +3535,9 @@ impl Config {
             for_self_update,
         )?;
 
-        if let Some(settings) = self.embedder.workspace_settings {
+        if let Some(settings) =
+            self.embedder.workspace_settings.and_then(|provide| provide(start_dir))
+        {
             self.apply_host_settings::<Sys>(
                 settings,
                 start_dir,

@@ -27,7 +27,7 @@ fn default_profile_keeps_pnpm_naming() {
     assert!(config.embedder.manage_runtimes);
     assert!(!config.embedder.workspaces_from_package_manifest);
     assert!(config.embedder.reads_pnpm_config);
-    assert_eq!(config.embedder.workspace_settings, None);
+    assert!(config.embedder.workspace_settings.is_none());
     assert_eq!(config.embedder.compat_package_extensions, None);
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");
     assert_eq!(config.embedder.virtual_store_dirname, ".pnpm");
@@ -211,9 +211,35 @@ fn a_host_that_reads_no_pnpm_config_ignores_the_workspace_yaml() {
     assert_eq!(nub.workspace_package_patterns, Some(vec!["packages/*".to_string()]));
 }
 
-/// Settings a host keeps for the rest of its run.
-fn host_settings(settings: serde_json::Value) -> &'static WorkspaceSettings {
-    Box::leak(Box::new(serde_json::from_value(settings).expect("parse the host settings")))
+thread_local! {
+    /// The settings the provider below answers with. A provider is a plain
+    /// function, so what it answers has to live somewhere it can reach
+    /// without capturing, and the engine asks while the test that set it is
+    /// still running: a thread-local is read from that same thread, so it
+    /// keeps one test's answer out of another's under a shared-process
+    /// runner without a lock the provider would then have to take
+    /// re-entrantly.
+    static HOST_SETTINGS: std::cell::Cell<Option<&'static WorkspaceSettings>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn provided_host_settings(_dir: &std::path::Path) -> Option<&'static WorkspaceSettings> {
+    HOST_SETTINGS.get()
+}
+
+fn set_host_settings(settings: serde_json::Value) {
+    HOST_SETTINGS.set(Some(Box::leak(Box::new(
+        serde_json::from_value(settings).expect("parse the host settings"),
+    ))));
+}
+
+/// Run `body` with `settings` as what the host answers.
+fn with_host_settings<T>(settings: serde_json::Value, body: impl FnOnce(Embedder) -> T) -> T {
+    set_host_settings(settings);
+    let embedder = Embedder { workspace_settings: Some(provided_host_settings), ..NUB };
+    let outcome = body(embedder);
+    HOST_SETTINGS.set(None);
+    outcome
 }
 
 /// A host's settings land where the yaml's would, explicit-setting record
@@ -221,31 +247,35 @@ fn host_settings(settings: serde_json::Value) -> &'static WorkspaceSettings {
 /// single project stays one, and a member still resolves to its root.
 #[test]
 fn host_settings_apply_where_the_workspace_yaml_would() {
-    let embedder = Embedder {
-        workspace_settings: Some(host_settings(
-            serde_json::json!({ "nodeLinker": "hoisted", "dedupePeers": true }),
-        )),
-        ..NUB
-    };
+    with_host_settings(
+        serde_json::json!({ "nodeLinker": "hoisted", "dedupePeers": true }),
+        |embedder| {
+            let single = tempfile::tempdir().expect("create a temp project dir");
+            std::fs::write(
+                single.path().join("package.json"),
+                r#"{"name":"app","version":"1.0.0"}"#,
+            )
+            .expect("write the manifest");
+            let config = Config { embedder, ..Config::default() }
+                .current::<crate::Host>(single.path())
+                .expect("load config");
+            assert_eq!(config.node_linker, NodeLinker::Hoisted);
+            assert!(config.dedupe_peers);
+            assert_eq!(
+                config.explicit_settings.get("nodeLinker"),
+                Some(&serde_json::json!("hoisted"))
+            );
+            assert_eq!(config.workspace_dir, None);
 
-    let single = tempfile::tempdir().expect("create a temp project dir");
-    std::fs::write(single.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
-        .expect("write the manifest");
-    let config = Config { embedder, ..Config::default() }
-        .current::<crate::Host>(single.path())
-        .expect("load config");
-    assert_eq!(config.node_linker, NodeLinker::Hoisted);
-    assert!(config.dedupe_peers);
-    assert_eq!(config.explicit_settings.get("nodeLinker"), Some(&serde_json::json!("hoisted")));
-    assert_eq!(config.workspace_dir, None);
-
-    let workspace = tempfile::tempdir().expect("create a temp project dir");
-    write_manifest_workspace(workspace.path());
-    let config = Config { embedder, ..Config::default() }
-        .current::<crate::Host>(&workspace.path().join("packages").join("a"))
-        .expect("load config");
-    assert_eq!(config.node_linker, NodeLinker::Hoisted);
-    assert_eq!(config.workspace_dir.as_deref(), Some(workspace.path()));
+            let workspace = tempfile::tempdir().expect("create a temp project dir");
+            write_manifest_workspace(workspace.path());
+            let config = Config { embedder, ..Config::default() }
+                .current::<crate::Host>(&workspace.path().join("packages").join("a"))
+                .expect("load config");
+            assert_eq!(config.node_linker, NodeLinker::Hoisted);
+            assert_eq!(config.workspace_dir.as_deref(), Some(workspace.path()));
+        },
+    );
 }
 
 /// `catalog:` specifiers resolve against `pnpm-workspace.yaml` read a second
@@ -259,24 +289,25 @@ fn host_settings_carry_the_catalogs_a_workspace_manifest_would() {
     std::fs::write(dir.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
         .expect("write the manifest");
 
-    let embedder = Embedder {
-        workspace_settings: Some(host_settings(serde_json::json!({
+    with_host_settings(
+        serde_json::json!({
             "catalog": { "picocolors": "1.1.1" },
             "catalogs": { "default": { "picocolors": "1.1.0" }, "legacy": { "semver": "6.3.1" } },
-        }))),
-        ..NUB
-    };
-    let config = Config { embedder, ..Config::default() }
-        .current::<crate::Host>(dir.path())
-        .expect("load config");
-    let catalogs = config.catalogs.expect("the host catalogs reach the config");
-    assert_eq!(catalogs["default"]["picocolors"], "1.1.0");
-    assert_eq!(catalogs["legacy"]["semver"], "6.3.1");
+        }),
+        |embedder| {
+            let config = Config { embedder, ..Config::default() }
+                .current::<crate::Host>(dir.path())
+                .expect("load config");
+            let catalogs = config.catalogs.expect("the host catalogs reach the config");
+            assert_eq!(catalogs["default"]["picocolors"], "1.1.0");
+            assert_eq!(catalogs["legacy"]["semver"], "6.3.1");
 
-    // pnpm's own profile reads its catalogs from the workspace manifest, so
-    // nothing here fills the field for it.
-    let config = Config::default().current::<crate::Host>(dir.path()).expect("load config");
-    assert_eq!(config.catalogs, None);
+            // pnpm's own profile reads its catalogs from the workspace manifest, so
+            // nothing here fills the field for it.
+            let config = Config::default().current::<crate::Host>(dir.path()).expect("load config");
+            assert_eq!(config.catalogs, None);
+        },
+    );
 }
 
 /// Settings a host supplies can declare `patchedDependencies` for a project
@@ -291,21 +322,22 @@ fn host_patched_dependencies_resolve_without_a_workspace() {
     std::fs::write(dir.path().join("patches").join("left-pad.patch"), "patch body\n")
         .expect("write the patch");
 
-    let embedder = Embedder {
-        workspace_settings: Some(host_settings(serde_json::json!({
+    with_host_settings(
+        serde_json::json!({
             "patchedDependencies": { "left-pad@1.3.0": "patches/left-pad.patch" },
-        }))),
-        ..NUB
-    };
-    let config = Config { embedder, ..Config::default() }
-        .current::<crate::Host>(dir.path())
-        .expect("load config");
-    assert_eq!(config.workspace_dir, None);
-    let hashes = config
-        .patched_dependency_hashes()
-        .expect("hash the configured patch")
-        .expect("the host patch is configured");
-    assert!(hashes.contains_key("left-pad@1.3.0"), "{hashes:?}");
+        }),
+        |embedder| {
+            let config = Config { embedder, ..Config::default() }
+                .current::<crate::Host>(dir.path())
+                .expect("load config");
+            assert_eq!(config.workspace_dir, None);
+            let hashes = config
+                .patched_dependency_hashes()
+                .expect("hash the configured patch")
+                .expect("the host patch is configured");
+            assert!(hashes.contains_key("left-pad@1.3.0"), "{hashes:?}");
+        },
+    );
 }
 
 /// With no pnpm configuration read there is no default pnpmfile to look for
@@ -324,4 +356,31 @@ fn a_host_that_reads_no_pnpm_config_runs_no_default_pnpmfile() {
         .current::<crate::Host>(dir.path())
         .expect("load config");
     assert_eq!(nub.pnpmfile, Some(Vec::new()));
+}
+
+/// The host is asked for every configuration the engine builds, not once
+/// for the profile: a command that writes the host's own settings and then
+/// reloads — `approve-builds` recording an answer and rebuilding on it —
+/// has to see what it just wrote, exactly as pnpm re-reads its workspace
+/// manifest. One profile, two configurations, two different answers.
+#[test]
+fn the_host_is_asked_again_for_every_configuration() {
+    let dir = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(dir.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
+        .expect("write the manifest");
+    let embedder = Embedder { workspace_settings: Some(provided_host_settings), ..NUB };
+
+    set_host_settings(serde_json::json!({ "nodeLinker": "hoisted" }));
+    let before = Config { embedder, ..Config::default() }
+        .current::<crate::Host>(dir.path())
+        .expect("load config");
+    assert_eq!(before.node_linker, NodeLinker::Hoisted);
+
+    set_host_settings(serde_json::json!({ "nodeLinker": "isolated" }));
+    let after = Config { embedder, ..Config::default() }
+        .current::<crate::Host>(dir.path())
+        .expect("load config");
+    assert_eq!(after.node_linker, NodeLinker::Isolated);
+
+    HOST_SETTINGS.set(None);
 }
