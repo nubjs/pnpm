@@ -15,12 +15,13 @@ const NUB: Embedder = Embedder {
     reads_pnpm_config: false,
     workspace_settings: None,
     compat_package_extensions: None,
+    allow_builds_writer: None,
 };
 
 #[test]
 fn default_profile_keeps_pnpm_naming() {
     let config = Config::default();
-    assert_eq!(config.embedder, Embedder::PNPM);
+    assert_eq!(config.embedder.program_name, Embedder::PNPM.program_name);
     assert_eq!(config.embedder.program_name, "pnpm");
     assert!(config.embedder.manage_package_manager_versions);
     assert!(config.embedder.manage_runtimes);
@@ -77,7 +78,8 @@ fn profile_survives_the_config_cascade() {
         .current::<crate::Host>(dir.path())
         .expect("load config");
 
-    assert_eq!(config.embedder, NUB);
+    assert_eq!(config.embedder.program_name, NUB.program_name);
+    assert_eq!(config.embedder.lockfile_basename, NUB.lockfile_basename);
     assert_eq!(config.wanted_lockfile_name(), "nub.lock");
     assert_eq!(config.virtual_store_dir, dir.path().join("node_modules").join(".store"));
 }

@@ -23,7 +23,11 @@
 /// Borrowed fields are `'static`, which keeps the type `Copy` so passing it
 /// around costs nothing: a host's brand is fixed at compile time, and settings
 /// a host resolves at startup live for the rest of the run.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Not `PartialEq`: [`Self::allow_builds_writer`] is a function, and comparing
+/// two of those compares addresses rather than behavior. Compare the field a
+/// question is actually about.
+#[derive(Debug, Clone, Copy)]
 pub struct Embedder {
     /// Name the program is invoked by. Shown in command-line help and in
     /// the reporter's completion footer.
@@ -98,7 +102,22 @@ pub struct Embedder {
     /// rule set the same field, the built-in rule wins.
     pub compat_package_extensions:
         Option<&'static indexmap::IndexMap<String, crate::PackageExtension>>,
+
+    /// Where `approve-builds` records what the user decided. pnpm writes
+    /// `allowBuilds` into its workspace manifest; a host that reads no such
+    /// file has to keep the decision somewhere it will read back, or the
+    /// next install asks the same question again.
+    ///
+    /// The host is handed the directory the decision belongs to and the
+    /// decided packages, each with whether its scripts may run, and is
+    /// responsible for merging them into whatever it already had.
+    pub allow_builds_writer: Option<AllowBuildsWriter>,
 }
+
+/// Records a set of approve-builds decisions for a host that keeps them
+/// outside pnpm's workspace manifest. See
+/// [`Embedder::allow_builds_writer`].
+pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::Result<()>;
 
 impl Embedder {
     /// pnpm's own names. The default, and what standalone pnpm always uses.
@@ -113,6 +132,7 @@ impl Embedder {
         reads_pnpm_config: true,
         workspace_settings: None,
         compat_package_extensions: None,
+        allow_builds_writer: None,
     };
 }
 

@@ -1,6 +1,9 @@
 use pnpm_reporter::SilentReporter;
 
-use super::{ApproveBuildsArgs, ApproveBuildsError, partition_params, sort_unique};
+use super::{
+    ApprovalDecision, ApproveBuildsArgs, ApproveBuildsError, partition_params, sort_unique,
+    write_approval_settings,
+};
 
 fn pending(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| (*name).to_string()).collect()
@@ -77,4 +80,43 @@ fn rejects_positional_arguments_with_all() {
 #[test]
 fn sort_unique_dedupes_and_sorts() {
     assert_eq!(sort_unique(params(&["b", "a", "b"])), vec!["a".to_string(), "b".to_string()]);
+}
+
+/// A host that reads no workspace manifest records the decision itself, and
+/// the engine writes no `pnpm-workspace.yaml` behind its back — a file the
+/// host would never read, and which may mean something else to it entirely.
+#[test]
+fn a_host_writer_takes_the_approval_instead_of_the_workspace_manifest() {
+    fn record(dir: &std::path::Path, entries: &[(&str, bool)]) -> std::io::Result<()> {
+        let body: Vec<String> =
+            entries.iter().map(|(pkg, allowed)| format!("{pkg}={allowed}")).collect();
+        std::fs::write(dir.join("host-approvals"), body.join("\n"))
+    }
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let embedder =
+        pnpm_config::Embedder { allow_builds_writer: Some(record), ..pnpm_config::Embedder::PNPM };
+    let decision = ApprovalDecision {
+        decisions: [("esbuild".to_string(), true), ("sharp".to_string(), false)].into(),
+        build_packages: vec!["esbuild".to_string()],
+        clear_all: false,
+    };
+
+    write_approval_settings(dir.path(), &decision, embedder).expect("the host writer runs");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("host-approvals")).expect("the host's own file"),
+        "esbuild=true\nsharp=false"
+    );
+    assert!(
+        !dir.path().join("pnpm-workspace.yaml").exists(),
+        "the engine must not write its own manifest for a host that supplied a writer"
+    );
+
+    // pnpm itself is the control: with no writer, the manifest is where the
+    // decision goes.
+    write_approval_settings(dir.path(), &decision, pnpm_config::Embedder::PNPM)
+        .expect("pnpm's own path runs");
+    let manifest = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml"))
+        .expect("pnpm writes its workspace manifest");
+    assert!(manifest.contains("esbuild: true"), "{manifest}");
 }

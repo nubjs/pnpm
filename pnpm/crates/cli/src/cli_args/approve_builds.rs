@@ -88,7 +88,7 @@ impl ApproveBuildsArgs {
 
         let settings_dir =
             initial_config.workspace_dir.clone().unwrap_or_else(|| dir.to_path_buf());
-        write_approval_settings(&settings_dir, &decision)?;
+        write_approval_settings(&settings_dir, &decision, initial_config.embedder)?;
         clear_decided_ignored_builds(scan.modules_manifest, &scan.modules_dir, &decision)?;
 
         // Only a package that was awaiting approval has something to
@@ -181,12 +181,17 @@ fn confirm_selected_builds(build_packages: &[String]) -> miette::Result<bool> {
 pub(crate) fn write_approval_settings(
     settings_dir: &Path,
     decision: &ApprovalDecision,
+    embedder: pnpm_config::Embedder,
 ) -> miette::Result<()> {
-    set_allow_builds_clearing_legacy(
-        settings_dir,
-        decision.decisions.iter().map(|(pkg, &value)| (pkg.as_str(), value)),
-    )
-    .into_diagnostic()
+    let entries: Vec<(&str, bool)> =
+        decision.decisions.iter().map(|(pkg, &value)| (pkg.as_str(), value)).collect();
+    // A host that reads no workspace manifest must not have its decision
+    // written into one: it would never be read back, and the file itself
+    // may mean something to the host that the engine cannot know.
+    if let Some(write) = embedder.allow_builds_writer {
+        return write(settings_dir, &entries).into_diagnostic();
+    }
+    set_allow_builds_clearing_legacy(settings_dir, entries).into_diagnostic()
 }
 
 /// The names an `approve-builds` argument list decides, split by verdict.
