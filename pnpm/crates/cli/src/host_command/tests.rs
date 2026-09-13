@@ -1,4 +1,4 @@
-use super::command_name;
+use super::{command_name, working_dir};
 use std::ffi::OsString;
 
 fn name_of(argv: &[&str]) -> Option<String> {
@@ -68,4 +68,55 @@ fn an_option_this_grammar_does_not_declare_names_nothing() {
 #[test]
 fn a_universal_shorthand_does_not_hide_the_command() {
     assert_eq!(name_of(&["pnpm", "--silent", "install"]).as_deref(), Some("install"));
+}
+
+fn dir_of(argv: &[&str]) -> Option<String> {
+    working_dir(&argv.iter().map(OsString::from).collect::<Vec<_>>())
+        .map(|dir| dir.to_string_lossy().into_owned())
+}
+
+/// Every spelling of the one option, before the command and after it.
+/// `add` takes both a directory and package names, and pnpm reads the
+/// option on either side of them.
+#[test]
+fn the_working_directory_is_named_by_any_of_its_spellings() {
+    assert_eq!(dir_of(&["pnpm", "install", "--dir", "target"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "--dir", "target", "install"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "install", "--dir=target"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "install", "-C", "target"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "install", "-Ctarget"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "install", "--prefix", "target"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "add", "left-pad", "-C", "target"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "install"]), None);
+}
+
+/// The cases a host scanning for the option itself would get wrong: an
+/// earlier option claims the token after it, a short cluster hides the
+/// `C`, and a `C` that follows a value-taking short is that option's
+/// value rather than this one.
+#[test]
+fn the_working_directory_is_not_what_a_naive_scan_would_find() {
+    assert_eq!(dir_of(&["pnpm", "--store-dir", "--dir", "install"]), None);
+    assert_eq!(dir_of(&["pnpm", "-rC", "target", "install"]).as_deref(), Some("target"));
+    assert_eq!(dir_of(&["pnpm", "--filter", "-C", "install"]), None);
+    assert_eq!(dir_of(&["pnpm", "-FC", "install"]), None);
+    assert_eq!(dir_of(&["pnpm", "install", "--", "--dir", "target"]), None);
+}
+
+/// A command that passes its tail to a child gives the tail away, so the
+/// option belongs to the child. Measured against pnpm 12.4.1: `pnpm run
+/// show --dir target` hands `--dir target` to the script, and node
+/// rejects it.
+#[test]
+fn a_directory_in_a_child_s_tail_is_the_child_s() {
+    assert_eq!(dir_of(&["pnpm", "run", "build", "--dir", "target"]), None);
+    assert_eq!(dir_of(&["pnpm", "run", "--dir", "target", "build"]).as_deref(), Some("target"));
+}
+
+/// An option this grammar does not declare is a host's own, and reading
+/// its value as a directory would send the host somewhere the command
+/// line never named.
+#[test]
+fn an_undeclared_option_withholds_an_answer() {
+    assert_eq!(dir_of(&["pnpm", "--require", "--dir", "install"]), None);
 }

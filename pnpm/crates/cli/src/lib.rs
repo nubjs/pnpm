@@ -111,7 +111,7 @@ pub fn run(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Resu
     run_on_big_stack(move || run_argv(argv, embedder))
 }
 
-pub use host_command::command_name;
+pub use host_command::{command_name, working_dir};
 
 fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
     let argv_with_alias = argv_with_alias_subcommand(argv);
