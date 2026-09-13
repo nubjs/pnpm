@@ -1400,6 +1400,118 @@ fn two_package_gvs_fixture() -> (Config, HashMap<PackageKey, SnapshotEntry>) {
     (config, snapshots)
 }
 
+/// Keeps nothing, and records the store-index key it was given for each
+/// package so a test can assert the policy could look one up at all.
+#[derive(Debug, Default)]
+struct RecordsIndexKeys(std::sync::Mutex<Vec<(String, Option<String>)>>);
+
+impl pnpm_store_dir::MaterializePolicy for RecordsIndexKeys {
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> std::collections::HashSet<String> {
+        let mut seen: Vec<(String, Option<String>)> = resolved
+            .iter()
+            .map(|package| (package.id.to_owned(), package.index_key.map(str::to_owned)))
+            .collect();
+        seen.sort();
+        *self.0.lock().expect("record what the policy was given") = seen;
+        std::collections::HashSet::new()
+    }
+}
+
+/// A policy decides by what a package CONTAINS, not only by its name: a
+/// package already in the store is never extracted, so a host watching
+/// extractions never hears about it and has to read the store instead.
+/// That means it needs the key the package's row takes there.
+#[test]
+fn the_materialize_policy_is_given_each_package_s_store_index_key() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let mut packages = HashMap::new();
+    packages.insert(
+        "bar@4.5.6".parse::<PackageKey>().unwrap(),
+        package_metadata(
+            LockfileResolution::Registry(RegistryResolution {
+                integrity: "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .parse()
+                    .expect("parse integrity"),
+                revision: None,
+            }),
+            Some("4.5.6"),
+        ),
+    );
+    let policy = std::sync::Arc::new(RecordsIndexKeys::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+
+    let _ = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        Some(&packages),
+        None,
+        None,
+    );
+
+    let seen = policy.0.lock().expect("read what the policy was given").clone();
+    let bar = seen.iter().find(|(id, _)| id == "bar@4.5.6").expect("the policy saw the package");
+    assert!(
+        bar.1.as_deref().is_some_and(|key| key.contains("bar@4.5.6")),
+        "a package with a resolution must carry its store-index key, got {:?}",
+        bar.1,
+    );
+    let foo =
+        seen.iter().find(|(id, _)| id == "@scope/foo@1.2.3").expect("the policy saw the package");
+    assert_eq!(
+        foo.1, None,
+        "a package with no row to name must carry no key rather than a wrong one",
+    );
+}
+
+/// The cached layout path narrows by the same policy, so it has to hand
+/// over the same keys. It is also the path a warm machine takes, so a
+/// regression here would hide behind every test that builds a layout from
+/// scratch.
+#[test]
+fn the_cached_layout_gives_the_policy_the_same_store_index_keys() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let mut packages = HashMap::new();
+    packages.insert(
+        "bar@4.5.6".parse::<PackageKey>().unwrap(),
+        package_metadata(
+            LockfileResolution::Registry(RegistryResolution {
+                integrity: "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .parse()
+                    .expect("parse integrity"),
+                revision: None,
+            }),
+            Some("4.5.6"),
+        ),
+    );
+    let policy = std::sync::Arc::new(RecordsIndexKeys::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+
+    let _ = VirtualStoreLayout::new_cached(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        Some(&packages),
+        None,
+        None,
+    );
+
+    let seen = policy.0.lock().expect("read what the policy was given").clone();
+    let bar = seen.iter().find(|(id, _)| id == "bar@4.5.6").expect("the policy saw the package");
+    assert!(
+        bar.1.as_deref().is_some_and(|key| key.contains("bar@4.5.6")),
+        "the cached path must carry the store-index key too, got {:?}",
+        bar.1,
+    );
+}
+
 /// Keeps one package and everything that imports it, which is the shape a
 /// policy needs and the reason it is handed the graph: a package kept out
 /// of the shared store is only sound if its importers are kept out too.

@@ -58,6 +58,15 @@ pub struct ResolvedPackage<'a> {
     /// way. A dependency that resolves to a link rather than to a package
     /// of its own is absent, having no identifier to name.
     pub dependencies: &'a [String],
+
+    /// The key this package's row takes in the store index, for a policy
+    /// that decides by looking at what the package contains.
+    ///
+    /// A package already in the store when the install began is never
+    /// extracted, so a host watching extractions does not hear about it.
+    /// Reading the store is how such a host reaches it anyway. `None` for
+    /// a resolution with no store row to name — a directory or a link.
+    pub index_key: Option<&'a str>,
 }
 
 /// Decides which packages must be materialized in the project rather than

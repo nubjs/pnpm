@@ -244,7 +244,7 @@ impl VirtualStoreLayout {
             allow_build_policy,
             lockfile_dir,
         );
-        layout.apply_materialize_policy(config, snapshots);
+        layout.apply_materialize_policy(config, snapshots, packages);
         layout
     }
 
@@ -257,6 +257,7 @@ impl VirtualStoreLayout {
         &mut self,
         config: &Config,
         snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
+        packages: Option<&HashMap<PackageKey, PackageMetadata>>,
     ) {
         let (Some(policy), Some(snapshots)) = (config.materialize_policy.as_deref(), snapshots)
         else {
@@ -266,7 +267,7 @@ impl VirtualStoreLayout {
         // resolving a dependency reference to the key it points at is
         // lockfile work, and the seam the policy sees is deliberately free
         // of lockfile types.
-        let edges: Vec<(String, Vec<String>)> = snapshots
+        let rows: Vec<(String, Vec<String>, Option<String>)> = snapshots
             .iter()
             .map(|(key, entry)| {
                 let dependencies = entry
@@ -276,12 +277,27 @@ impl VirtualStoreLayout {
                     .chain(entry.optional_dependencies.iter().flatten())
                     .filter_map(|(name, dep)| Some(dep.resolve(name)?.pkg_id()))
                     .collect();
-                (key.pkg_id(), dependencies)
+                let pkg_id = key.pkg_id();
+                // `built` is the run's script decision, exactly as
+                // `create_virtual_store` derives it when it names the same
+                // row; it only distinguishes the two git-hosted variants.
+                let index_key = packages.and_then(|packages| {
+                    crate::store_index_key_for_resolution(
+                        &packages.get(key)?.resolution,
+                        &pkg_id,
+                        !config.ignore_scripts,
+                    )
+                });
+                (pkg_id, dependencies, index_key)
             })
             .collect();
-        let resolved: Vec<pnpm_store_dir::ResolvedPackage<'_>> = edges
+        let resolved: Vec<pnpm_store_dir::ResolvedPackage<'_>> = rows
             .iter()
-            .map(|(id, dependencies)| pnpm_store_dir::ResolvedPackage { id, dependencies })
+            .map(|(id, dependencies, index_key)| pnpm_store_dir::ResolvedPackage {
+                id,
+                dependencies,
+                index_key: index_key.as_deref(),
+            })
             .collect();
         let keep_local = policy.materialize_locally(&resolved);
         self.locally_materialized =
@@ -345,19 +361,26 @@ impl VirtualStoreLayout {
                 entries = gvs_suffixes.len(),
                 "phase complete",
             );
-            return Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), lockfile_dir);
+            return Self::with_cached_suffixes(
+                config,
+                gvs_suffixes,
+                Some(snapshots),
+                packages,
+                lockfile_dir,
+            );
         }
         let gvs_suffixes = hasher.suffixes(snapshots);
         if let Some(cache_file) = cache_file {
             gvs_layout_cache::store(cache_file, &gvs_suffixes);
         }
-        Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), lockfile_dir)
+        Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), packages, lockfile_dir)
     }
 
     fn with_cached_suffixes(
         config: &Config,
         gvs_suffixes: HashMap<PackageKey, String>,
         snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
+        packages: Option<&HashMap<PackageKey, PackageMetadata>>,
         lockfile_dir: Option<&Path>,
     ) -> Self {
         let mut layout = VirtualStoreLayout {
@@ -370,7 +393,7 @@ impl VirtualStoreLayout {
         };
         // The cache stores the suffix map, which the policy does not
         // touch, so a cached layout still has to be narrowed here.
-        layout.apply_materialize_policy(config, snapshots);
+        layout.apply_materialize_policy(config, snapshots, packages);
         layout
     }
 
