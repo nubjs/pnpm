@@ -611,7 +611,9 @@ pub(crate) fn apply_allow_build(
     // before the loop below borrows `config` mutably; the profile is `Copy`.
     match allow_builds_writer {
         Some(write) => write(settings_dir, &allow_build_map).into_diagnostic()?,
-        None => set_allow_builds(settings_dir, allow_build_map.iter().copied()).into_diagnostic()?,
+        None => {
+            set_allow_builds(settings_dir, allow_build_map.iter().copied()).into_diagnostic()?
+        }
     }
     for (name, is_allow) in allow_build_map {
         config.allow_builds.insert(name.to_string(), is_allow);

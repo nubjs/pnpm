@@ -256,8 +256,7 @@ fn workspace_selectors_reject_a_selector_without_a_package_name() {
 #[test]
 fn allow_build_goes_through_the_hosts_writer_and_leaves_the_yaml_alone() {
     fn record(dir: &std::path::Path, entries: &[(&str, bool)]) -> std::io::Result<()> {
-        let body =
-            entries.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(",");
+        let body = entries.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(",");
         std::fs::write(dir.join("host-allow-builds"), body)
     }
 

@@ -39,7 +39,9 @@ pub enum LinkError {
     /// to record it that the next install would read back, so this refuses
     /// before touching `package.json` rather than leaving a dependency
     /// resolving to the registry copy.
-    #[display("Linked dependencies cannot be recorded for you, because {settings_file} is not this program's to write.")]
+    #[display(
+        "Linked dependencies cannot be recorded for you, because {settings_file} is not this program's to write."
+    )]
     #[diagnostic(
         code(ERR_PNPM_LINK_OVERRIDES_NOT_WRITABLE),
         help("Add these to overrides in {settings_file} by hand, then install:\n  {specifiers}")

@@ -37,7 +37,9 @@ pub enum PatchRemoveError {
     )]
     #[diagnostic(
         code(ERR_PNPM_PATCHED_DEPENDENCIES_NOT_WRITABLE),
-        help("Remove these from patchedDependencies in {settings_file} by hand, then install:\n  {entries}")
+        help(
+            "Remove these from patchedDependencies in {settings_file} by hand, then install:\n  {entries}"
+        )
     )]
     PatchedDependenciesNotWritable { settings_file: &'static str, entries: String },
 

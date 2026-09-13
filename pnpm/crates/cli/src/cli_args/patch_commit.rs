@@ -50,7 +50,9 @@ pub(crate) enum PatchCommitError {
     )]
     #[diagnostic(
         code(ERR_PNPM_PATCHED_DEPENDENCIES_NOT_WRITABLE),
-        help("Add this to patchedDependencies in {settings_file} by hand, then install:\n  {entry}")
+        help(
+            "Add this to patchedDependencies in {settings_file} by hand, then install:\n  {entry}"
+        )
     )]
     PatchedDependenciesNotWritable { settings_file: &'static str, entry: String },
 
