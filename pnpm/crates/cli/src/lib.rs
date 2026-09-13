@@ -60,7 +60,14 @@ pub fn main() -> ExitCode {
     }
 }
 
-fn is_reported_error(error: &miette::Report) -> bool {
+/// Whether the failing command has already reported itself.
+///
+/// [`main`] skips the top-level render for these, because the command
+/// printed its own report. A host embedding the engine renders what
+/// [`run`] hands back and needs the same answer, or a failure it declines
+/// to render here reaches the user twice.
+#[must_use]
+pub fn is_reported_error(error: &miette::Report) -> bool {
     error.code().is_some_and(|code| {
         matches!(
             code.to_string().as_str(),
