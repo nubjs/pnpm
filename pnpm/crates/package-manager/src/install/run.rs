@@ -2268,7 +2268,9 @@ async fn decide_frozen_path(dispatch: &FrozenDispatch<'_>) -> Result<bool, Insta
     }
     if dispatch.frozen_lockfile {
         let Some(lockfile) = dispatch.lockfile else {
-            return Err(InstallError::NoLockfile);
+            return Err(InstallError::NoLockfile {
+                lockfile_name: dispatch.config.wanted_lockfile_name().to_owned(),
+            });
         };
         // Run the freshness gates; on failure surface a fatal InstallError via
         // `FreshnessCheckError`'s `From` impl. The check is run for its side

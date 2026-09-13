@@ -3202,6 +3202,7 @@ impl Config {
         WantedLockfileSelection {
             file_name: self.wanted_lockfile_name().to_owned(),
             merge_git_branch_lockfiles: self.merge_git_branch_lockfiles,
+            legacy_file_names: self.embedder.lockfile_legacy_basenames,
         }
     }
 

@@ -495,10 +495,11 @@ pub(crate) async fn fix_with_update<Reporter: self::Reporter + 'static>(
     // A missing lockfile here means the update couldn't be verified; mirror
     // pnpm's `fixWithUpdate`, which errors rather than reporting everything
     // fixed against an empty installed set.
-    let Some(updated) = Lockfile::load_wanted_from_dir(lockfile_dir)
+    let selection = state.config.wanted_lockfile_selection();
+    let Some(updated) = Lockfile::load_wanted(lockfile_dir, &selection)
         .map_err(|err| miette::Report::new(err).wrap_err("re-read the lockfile after update"))?
     else {
-        return Err(AuditError::NoLockfileAfterUpdate.into());
+        return Err(AuditError::NoLockfileAfterUpdate { lockfile_name: selection.file_name }.into());
     };
     let installed = installed_packages(&updated);
     let (fixed, remaining) = report_fixed_remaining(

@@ -10,17 +10,21 @@ use super::{
 #[derive(Debug, Display, Error, Diagnostic)]
 #[non_exhaustive]
 pub(crate) enum AuditError {
-    #[display("No pnpm-lock.yaml found: Cannot audit a project without a lockfile")]
+    /// Both lockfile errors name the file the configuration asks for rather
+    /// than spelling `pnpm-lock.yaml`: an embedding host audits its own
+    /// lockfile, and a `#[display]` literal is compile-time, so a host that
+    /// rewrites the engine's output cannot reach it.
+    #[display("No {lockfile_name} found: Cannot audit a project without a lockfile")]
     #[diagnostic(code(ERR_PNPM_AUDIT_NO_LOCKFILE))]
-    NoLockfile,
+    NoLockfile { lockfile_name: String },
 
     #[display("No installed packages found to audit")]
     #[diagnostic(code(ERR_PNPM_AUDIT_NO_PACKAGES))]
     NoPackages,
 
-    #[display("No pnpm-lock.yaml found after update: Cannot report fixed vulnerabilities")]
+    #[display("No {lockfile_name} found after update: Cannot report fixed vulnerabilities")]
     #[diagnostic(code(ERR_PNPM_AUDIT_NO_LOCKFILE))]
-    NoLockfileAfterUpdate,
+    NoLockfileAfterUpdate { lockfile_name: String },
 
     #[display("Unknown audit subcommand: {subcommand}")]
     #[diagnostic(code(ERR_PNPM_AUDIT_UNKNOWN_SUBCOMMAND))]

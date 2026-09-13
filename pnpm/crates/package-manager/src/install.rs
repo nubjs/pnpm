@@ -581,11 +581,14 @@ pub enum InstallError {
     /// same code and message from `requireHooks`.
     #[diagnostic(code(ERR_PNPM_PNPMFILE_NOT_FOUND))]
     MissingPnpmfile(#[error(not(source))] pnpm_hooks::finder::MissingPnpmfileError),
+    /// The wanted lockfile is named rather than spelled, because an
+    /// embedding host installs from a lockfile of its own and the advice is
+    /// useless pointing at a file that host never writes.
     #[display(
-        "Headless installation requires a pnpm-lock.yaml file, but none was found. Run `pnpm install` without --frozen-lockfile to create one."
+        "Headless installation requires a {lockfile_name} file, but none was found. Run `pnpm install` without --frozen-lockfile to create one."
     )]
     #[diagnostic(code(ERR_PNPM_NO_LOCKFILE))]
-    NoLockfile,
+    NoLockfile { lockfile_name: String },
 
     /// A `packageExtensions` selector the freshness gates could not parse.
     /// The resolver reports the same error; this reaches it first because

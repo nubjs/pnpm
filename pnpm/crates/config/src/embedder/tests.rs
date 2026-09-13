@@ -11,6 +11,7 @@ const NUB: Embedder = Embedder {
     manage_runtimes: false,
     workspaces_from_package_manifest: true,
     lockfile_basename: "nub.lock",
+    lockfile_legacy_basenames: &["lock.yaml"],
     virtual_store_dirname: ".store",
     reads_pnpm_config: false,
     workspace_settings: None,
@@ -385,4 +386,19 @@ fn the_host_is_asked_again_for_every_configuration() {
     assert_eq!(after.node_linker, NodeLinker::Isolated);
 
     HOST_SETTINGS.set(None);
+}
+
+/// The profile's legacy names travel into the loader's selection. That trip
+/// is the whole mechanism: the loader is where a file name is resolved, and
+/// it never sees the profile itself.
+#[test]
+fn embedder_legacy_lockfile_names_reach_the_loader_selection() {
+    let config = Config { embedder: NUB, ..Config::default() };
+    let selection = config.wanted_lockfile_selection();
+    assert_eq!(selection.file_name, "nub.lock");
+    assert_eq!(selection.legacy_file_names, ["lock.yaml"]);
+
+    // pnpm's own profile carries none, so standalone pnpm still reads
+    // exactly the one file it always did.
+    assert!(Config::default().wanted_lockfile_selection().legacy_file_names.is_empty());
 }

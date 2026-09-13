@@ -309,7 +309,10 @@ impl AuditArgs {
             .get()
             .map_err(|err| miette::Report::new(err).wrap_err("load the lockfile"))?;
         let Some(lockfile) = lockfile else {
-            return Err(AuditError::NoLockfile.into());
+            return Err(AuditError::NoLockfile {
+                lockfile_name: state.config.wanted_lockfile_name().to_owned(),
+            }
+            .into());
         };
         let env_lockfile = EnvLockfile::read(lockfile_dir)
             .map_err(|err| miette::Report::new(err).wrap_err("load the env lockfile"))?;
@@ -470,7 +473,10 @@ fn signature_packages(
         .get()
         .map_err(|err| miette::Report::new(err).wrap_err("load the lockfile"))?;
     let Some(lockfile) = lockfile else {
-        return Err(AuditError::NoLockfile.into());
+        return Err(AuditError::NoLockfile {
+            lockfile_name: state.config.wanted_lockfile_name().to_owned(),
+        }
+        .into());
     };
     let env_lockfile = EnvLockfile::read(lockfile_dir)
         .map_err(|err| miette::Report::new(err).wrap_err("load the env lockfile"))?;

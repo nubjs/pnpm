@@ -1084,7 +1084,7 @@ async fn should_error_when_frozen_lockfile_is_requested_but_none_exists() {
     .run::<SilentReporter>()
     .await;
 
-    assert!(matches!(result, Err(InstallError::NoLockfile)));
+    assert!(matches!(result, Err(InstallError::NoLockfile { .. })));
     drop(dirs.dir);
 }
 
@@ -1474,7 +1474,7 @@ async fn frozen_lockfile_flag_with_no_lockfile_errors() {
     .run::<SilentReporter>()
     .await;
 
-    assert!(matches!(result, Err(InstallError::NoLockfile)));
+    assert!(matches!(result, Err(InstallError::NoLockfile { .. })));
     drop(dirs.dir);
 }
 

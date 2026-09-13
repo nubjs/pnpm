@@ -363,6 +363,10 @@ pub struct WantedLockfileSelection {
     /// next to the file that was read into the loaded lockfile. The
     /// install deletes them once it has written the merge back.
     pub merge_git_branch_lockfiles: bool,
+    /// Names an embedding host used for its lockfile before
+    /// [`Self::file_name`], read when that file is absent and never
+    /// written. Empty for pnpm itself.
+    pub legacy_file_names: &'static [&'static str],
 }
 
 impl Default for WantedLockfileSelection {
@@ -370,15 +374,24 @@ impl Default for WantedLockfileSelection {
         WantedLockfileSelection {
             file_name: Lockfile::FILE_NAME.to_owned(),
             merge_git_branch_lockfiles: false,
+            legacy_file_names: &[],
         }
     }
 }
 
 impl WantedLockfileSelection {
     /// The file names to try, most specific first.
+    ///
+    /// A host's own superseded names rank above `pnpm-lock.yaml`: the last
+    /// entry is what a branch-suffixed selection falls back to, and a
+    /// project that predates the host's rename is answering for the host,
+    /// not for pnpm.
     fn read_order(&self) -> impl Iterator<Item = &str> {
         let branch_file = (self.file_name != Lockfile::FILE_NAME).then_some(&*self.file_name);
-        branch_file.into_iter().chain([Lockfile::FILE_NAME])
+        branch_file
+            .into_iter()
+            .chain(self.legacy_file_names.iter().copied())
+            .chain([Lockfile::FILE_NAME])
     }
 }
 

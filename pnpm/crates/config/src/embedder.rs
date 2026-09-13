@@ -67,6 +67,16 @@ pub struct Embedder {
     /// when no git-branch lockfile is in play.
     pub lockfile_basename: &'static str,
 
+    /// Basenames the engine still READS when
+    /// [`Self::lockfile_basename`] is absent, most preferred first.
+    ///
+    /// A host that renames its lockfile has projects on disk carrying the
+    /// old name, and they must keep installing across the upgrade. Read-only
+    /// by design: an install writes [`Self::lockfile_basename`], so the first
+    /// write after the rename is what retires the old file, and a frozen or
+    /// headless install that writes nothing leaves it exactly as it found it.
+    pub lockfile_legacy_basenames: &'static [&'static str],
+
     /// Leaf directory of the virtual store inside the modules directory —
     /// the `.pnpm` in `node_modules/.pnpm`. Applies only when the virtual
     /// store directory is derived; an explicit `virtualStoreDir` setting
@@ -162,6 +172,7 @@ impl Embedder {
         manage_runtimes: true,
         workspaces_from_package_manifest: false,
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
+        lockfile_legacy_basenames: &[],
         virtual_store_dirname: ".pnpm",
         reads_pnpm_config: true,
         workspace_settings: None,

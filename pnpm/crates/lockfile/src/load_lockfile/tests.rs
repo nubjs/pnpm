@@ -482,3 +482,69 @@ fn parses_link_dep_in_injected_snapshot() {
     assert_eq!(c_ref, &SnapshotDepRef::Link("packages/c".to_string()));
     assert_eq!(c_ref.resolve(&c_name), None);
 }
+
+/// A second body that parses, differing from [`MAIN_DOC`] in what it
+/// resolves. Two distinguishable bodies are what let the tests below say
+/// WHICH file the loader read rather than only that it read one.
+const MINIMAL_DOC: &str = text_block! {
+    "lockfileVersion: '9.0'"
+    ""
+    "importers:"
+    ""
+    "  .: {}"
+};
+
+fn parse_doc(content: &str) -> Lockfile {
+    let tmp = tempdir().expect("create tempdir");
+    let path = tmp.path().join(Lockfile::FILE_NAME);
+    std::fs::write(&path, content).expect("write lockfile");
+    Lockfile::load_from_path(&path).expect("parse lockfile").expect("lockfile should be present")
+}
+
+#[test]
+fn a_legacy_basename_is_read_when_the_wanted_lockfile_is_absent() {
+    let tmp = tempdir().expect("create tempdir");
+    std::fs::write(tmp.path().join("lock.yaml"), MAIN_DOC).expect("write the legacy lockfile");
+
+    // Control: pnpm's own profile declares no legacy names, so the same
+    // directory reads as having no lockfile at all. Without this the test
+    // would still pass on a loader that simply tried every file it found.
+    assert_eq!(
+        Lockfile::load_wanted(tmp.path(), &WantedLockfileSelection::default())
+            .expect("load under pnpm's own selection"),
+        None,
+    );
+
+    let selection = WantedLockfileSelection {
+        file_name: "nub.lock".to_owned(),
+        legacy_file_names: &["lock.yaml"],
+        ..WantedLockfileSelection::default()
+    };
+    let loaded = Lockfile::load_wanted(tmp.path(), &selection)
+        .expect("load under a host selection")
+        .expect("the legacy lockfile should be found");
+
+    assert_eq!(loaded, parse_doc(MAIN_DOC));
+}
+
+/// The legacy name is a fallback, never a preference: a host that has
+/// already written its current lockfile must resolve from that one, or the
+/// install would keep answering from the file it is retiring.
+#[test]
+fn the_wanted_lockfile_outranks_a_legacy_one() {
+    let tmp = tempdir().expect("create tempdir");
+    std::fs::write(tmp.path().join("lock.yaml"), MAIN_DOC).expect("write the legacy lockfile");
+    std::fs::write(tmp.path().join("nub.lock"), MINIMAL_DOC).expect("write the wanted lockfile");
+
+    let selection = WantedLockfileSelection {
+        file_name: "nub.lock".to_owned(),
+        legacy_file_names: &["lock.yaml"],
+        ..WantedLockfileSelection::default()
+    };
+    let loaded = Lockfile::load_wanted(tmp.path(), &selection)
+        .expect("load under a host selection")
+        .expect("the wanted lockfile should be found");
+
+    assert_eq!(loaded, parse_doc(MINIMAL_DOC));
+    assert_ne!(loaded, parse_doc(MAIN_DOC));
+}
