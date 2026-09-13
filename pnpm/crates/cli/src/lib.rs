@@ -16,6 +16,7 @@ mod engine_pm;
 mod executable_link;
 mod flag_relocation;
 mod github_actions;
+mod host_command;
 mod install_as_add;
 mod leading_separator;
 mod package_specifier;
@@ -102,6 +103,8 @@ fn run_cli() -> miette::Result<()> {
 pub fn run(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
     run_on_big_stack(move || run_argv(argv, embedder))
 }
+
+pub use host_command::command_name;
 
 fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
     let argv_with_alias = argv_with_alias_subcommand(argv);
