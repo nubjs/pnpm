@@ -14,6 +14,7 @@ const NUB: Embedder = Embedder {
     lockfile_legacy_basenames: &["lock.yaml"],
     virtual_store_dirname: ".store",
     reads_pnpm_config: false,
+    writes_settings_file: false,
     workspace_settings: None,
     compat_package_extensions: None,
     allow_builds_writer: None,
@@ -421,4 +422,18 @@ fn the_settings_file_a_diagnostic_names_comes_from_the_profile() {
     // whole point: NUB reads no `pnpm-workspace.yaml`, so a diagnostic naming
     // one would be advice its user cannot act on.
     assert_eq!(NUB.settings_file_display_name, "nub.jsonc");
+}
+
+/// Naming a settings file and editing it are separate permissions. pnpm both
+/// names and writes its own manifest; a host that resolves its own
+/// configuration names its file for the user — the test above — and has the
+/// engine write nothing, because the entries would never be read back and the
+/// host's format is not one this engine emits.
+///
+/// Read through `Config`, which is where every consumer reads it and which
+/// pins the default at the same time.
+#[test]
+fn only_pnpms_own_profile_lets_the_engine_write_the_settings_file() {
+    assert!(Config::default().embedder.writes_settings_file);
+    assert!(!Config { embedder: NUB, ..Config::default() }.embedder.writes_settings_file);
 }

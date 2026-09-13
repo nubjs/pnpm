@@ -353,6 +353,108 @@ async fn denying_approval_leaves_the_workspace_manifest_unchanged() {
     assert_eq!(prompt_actions(), [PromptAction::Start, PromptAction::End]);
 }
 
+/// A host whose settings file the engine may not write has nowhere to record
+/// an exclude entry, so the loose path refuses with the entries to add by
+/// hand instead of announcing a write it did not make.
+/// `loose_mode_persists_excludes_without_prompting` is the control: the same
+/// call under pnpm's profile writes the file and emits exactly that message.
+#[tokio::test]
+async fn a_host_that_writes_no_settings_file_refuses_rather_than_report_a_write() {
+    recording_reporter!(reset_events);
+    reset_events();
+    let dir = tempdir().expect("temp dir");
+    let path = dir.path().join("pnpm-workspace.yaml");
+    fs::write(&path, "packages:\n  - packages/*\n").expect("write workspace manifest");
+    let original = fs::read_to_string(&path).expect("read original");
+    let mut config = Config::new();
+    config.embedder = host_that_writes_no_settings_file();
+    config.minimum_release_age = Some(60);
+    let mut prompt = FakePrompt::default();
+
+    let error = handle_minimum_release_age_violations_with::<RecordingReporter, _>(
+        &config,
+        dir.path(),
+        &[violation("foo", "1.0.0", "MINIMUM_RELEASE_AGE_VIOLATION")],
+        true,
+        true,
+        &mut prompt,
+    )
+    .await
+    .expect_err("an exclude that cannot be recorded must not pass silently");
+
+    assert!(matches!(error, MinimumReleaseAgeError::ExcludesNotWritable { .. }));
+    assert!(error.to_string().contains("foo@1.0.0"), "{error}");
+    assert_eq!(
+        miette::Diagnostic::help(&error).expect("the refusal names the file to edit").to_string(),
+        "Add these to minimumReleaseAgeExclude in nub.jsonc and run the install again, or wait for the packages to mature.",
+    );
+    assert_eq!(fs::read_to_string(path).expect("read unchanged manifest"), original);
+    assert!(EVENTS.lock().expect("event lock").is_empty(), "nothing may report the write");
+}
+
+/// The strict prompt offers to add the entries to the settings file, so under
+/// a host that writes none the run refuses before asking rather than
+/// collecting an approval it cannot keep.
+/// `approval_persists_canonical_excludes_and_brackets_the_prompt` is the
+/// control: the same call under pnpm's profile prompts and persists.
+#[tokio::test]
+async fn a_host_that_writes_no_settings_file_refuses_before_prompting() {
+    let dir = tempdir().expect("temp dir");
+    let mut config = Config::new();
+    config.embedder = host_that_writes_no_settings_file();
+    config.minimum_release_age_strict = Some(true);
+    let mut prompt = FakePrompt { answer: true, messages: Vec::new() };
+
+    let error = handle_minimum_release_age_violations_with::<SilentReporter, _>(
+        &config,
+        dir.path(),
+        &[violation("foo", "1.0.0", "MINIMUM_RELEASE_AGE_VIOLATION")],
+        true,
+        true,
+        &mut prompt,
+    )
+    .await
+    .expect_err("an approval that cannot be persisted must not be collected");
+
+    assert!(matches!(error, MinimumReleaseAgeError::ExcludesNotWritable { .. }));
+    assert!(prompt.messages.is_empty(), "{:?}", prompt.messages);
+}
+
+/// A strict run that persists nothing anyway — `dedupe --check` — is
+/// unaffected: it never writes under either profile, so the approval still
+/// stands on its own and the run proceeds.
+#[tokio::test]
+async fn a_run_that_persists_nothing_still_prompts_under_such_a_host() {
+    let dir = tempdir().expect("temp dir");
+    let mut config = Config::new();
+    config.embedder = host_that_writes_no_settings_file();
+    config.minimum_release_age_strict = Some(true);
+    let mut prompt = FakePrompt { answer: true, messages: Vec::new() };
+
+    handle_minimum_release_age_violations_with::<SilentReporter, _>(
+        &config,
+        dir.path(),
+        &[violation("foo", "1.0.0", "MINIMUM_RELEASE_AGE_VIOLATION")],
+        true,
+        false,
+        &mut prompt,
+    )
+    .await
+    .expect("approval should continue");
+
+    assert_eq!(prompt.messages.len(), 1);
+}
+
+/// A host that resolves its own configuration: the engine writes no settings
+/// file for it, and its diagnostics name the host's own.
+fn host_that_writes_no_settings_file() -> pnpm_config::Embedder {
+    pnpm_config::Embedder {
+        writes_settings_file: false,
+        settings_file_display_name: "nub.jsonc",
+        ..pnpm_config::Embedder::PNPM
+    }
+}
+
 #[tokio::test]
 async fn prompt_input_error_releases_the_reporter() {
     recording_reporter!(reset_events, prompt_actions);

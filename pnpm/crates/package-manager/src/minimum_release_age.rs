@@ -39,6 +39,17 @@ pub enum MinimumReleaseAgeError {
     )]
     NoMatureMatchingVersion { message: String, settings_file: &'static str },
 
+    // Explicit for the same reason as the variant above: two fields, so
+    // `derive_more` no longer forwards to one of them.
+    #[display("{message}")]
+    #[diagnostic(
+        code(ERR_PNPM_MINIMUM_RELEASE_AGE_EXCLUDE_NOT_WRITABLE),
+        help(
+            "Add these to minimumReleaseAgeExclude in {settings_file} and run the install again, or wait for the packages to mature."
+        )
+    )]
+    ExcludesNotWritable { message: String, settings_file: &'static str },
+
     #[display("Aborted: the immature versions were not approved.")]
     #[diagnostic(
         code(ERR_PNPM_MINIMUM_RELEASE_AGE_DENIED),
@@ -130,7 +141,19 @@ where
         return Ok(());
     }
 
+    // A host that resolves its own configuration is never written behind its
+    // back, so an exclude entry has nowhere to go that the next install would
+    // read it back from. Both recording paths refuse instead, naming the
+    // entries for the user to add by hand: dropping the write silently would
+    // report a change that never happened, and an approval this run cannot
+    // keep would stop the next install at the same gate. The non-interactive
+    // branch below already refuses on its own and gives the same advice.
+    let cannot_record = persist_excludes && !config.embedder.writes_settings_file;
+
     if !strict {
+        if cannot_record {
+            return Err(excludes_not_writable(config, &immature));
+        }
         return persist_and_report_excludes::<ReporterImpl>(
             workspace_dir,
             &immature,
@@ -144,6 +167,12 @@ where
             message: format_violation_error(&immature),
             settings_file: config.embedder.settings_file_display_name,
         });
+    }
+
+    // Before the prompt, not after it: the prompt offers to add the entries to
+    // the settings file, which is an offer this run cannot honor.
+    if cannot_record {
+        return Err(excludes_not_writable(config, &immature));
     }
 
     let message = format_prompt(&immature, config.embedder.settings_file_display_name);
@@ -169,6 +198,16 @@ where
         "(approved at the prompt)",
         config.embedder.settings_file_display_name,
     )
+}
+
+fn excludes_not_writable(
+    config: &Config,
+    immature: &[&ResolutionPolicyViolation],
+) -> MinimumReleaseAgeError {
+    MinimumReleaseAgeError::ExcludesNotWritable {
+        message: format_violation_error(immature),
+        settings_file: config.embedder.settings_file_display_name,
+    }
 }
 
 fn persist_and_report_excludes<ReporterImpl: Reporter>(

@@ -108,6 +108,32 @@ pub struct Embedder {
     /// either way, as are command-line options.
     pub reads_pnpm_config: bool,
 
+    /// Whether the engine may EDIT pnpm's settings file — the write-side twin
+    /// of [`Self::reads_pnpm_config`].
+    ///
+    /// Several paths record a decision by merging it into
+    /// `pnpm-workspace.yaml`: the `minimumReleaseAgeExclude` entries an
+    /// approved install persists, the catalog entries `add`/`update` resolve,
+    /// the `allowBuilds` lines an install scaffolds for the builds it blocked,
+    /// and the `configDependencies` `add --config` records. A host that
+    /// resolves its own configuration reads none of them back, and the file
+    /// may mean something to the host that the engine cannot know, so turning
+    /// this off stops every one of those writes.
+    ///
+    /// It does not follow that the write can simply be dropped. Where the
+    /// persisted entry is what lets the run proceed — the exclude list above
+    /// all — the path refuses instead and names the entries for the user to
+    /// add to [`Self::settings_file_display_name`] by hand; skipping it
+    /// silently would report a change that never happened and leave the next
+    /// install stopped at the same gate. The advisory writes are simply not
+    /// made.
+    ///
+    /// [`Self::settings_file_display_name`] answers a different question —
+    /// where the user should look — and is never a write target: it names the
+    /// host's own file, in the host's own format, which this crate's
+    /// format-preserving YAML writer cannot produce.
+    pub writes_settings_file: bool,
+
     /// Settings the host resolves from its own configuration, applied where
     /// `pnpm-workspace.yaml` sits in the cascade: above the `.npmrc` chain and
     /// the global `config.yaml`, below `PNPM_CONFIG_*`. They pass through the
@@ -190,6 +216,7 @@ impl Embedder {
         virtual_store_dirname: ".pnpm",
         settings_file_display_name: "pnpm-workspace.yaml",
         reads_pnpm_config: true,
+        writes_settings_file: true,
         workspace_settings: None,
         compat_package_extensions: None,
         allow_builds_writer: None,

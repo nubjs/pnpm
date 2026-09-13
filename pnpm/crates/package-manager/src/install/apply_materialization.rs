@@ -718,6 +718,7 @@ fn report_install_completion<Reporter: self::Reporter>(
         is_global_install,
         inputs.config.ignore_workspace,
         inputs.config.embedder.allow_builds_writer.is_some(),
+        inputs.config.embedder.writes_settings_file,
     ) {
         let allow_build_keys: BTreeSet<String> = inputs
             .ignored_builds
@@ -1056,27 +1057,45 @@ fn write_applied_workspace_state(
 /// `allowBuilds` of its own never reads this file, so the line would be
 /// left where nobody looks and the file's mere existence may mean something
 /// to that host which this run cannot know.
+/// The scaffolded line is advisory — it shows the user where to grant the
+/// build — so a host that edits no settings file simply gets none, and the
+/// strict failure below still names the blocked packages. This is a separate
+/// question from `host_owns_allow_builds`: a host may decline the engine's
+/// writes without supplying a writer of its own, and then neither file is
+/// touched.
 fn scaffolds_allow_builds(
     blocked_any_build: bool,
     is_global_install: bool,
     ignore_workspace: bool,
     host_owns_allow_builds: bool,
+    writes_settings_file: bool,
 ) -> bool {
-    blocked_any_build && !is_global_install && !ignore_workspace && !host_owns_allow_builds
+    blocked_any_build
+        && !is_global_install
+        && !ignore_workspace
+        && !host_owns_allow_builds
+        && writes_settings_file
 }
 
 #[cfg(test)]
 mod tests {
     use super::scaffolds_allow_builds;
 
-    /// A blocked build earns the line, and each of the three reasons not to
+    /// A blocked build earns the line, and each of the four reasons not to
     /// write it takes it away on its own.
     #[test]
     fn only_a_blocked_build_in_a_manifest_the_run_owns_earns_a_line() {
-        assert!(scaffolds_allow_builds(true, false, false, false));
-        assert!(!scaffolds_allow_builds(false, false, false, false), "nothing was blocked");
-        assert!(!scaffolds_allow_builds(true, true, false, false), "a global install");
-        assert!(!scaffolds_allow_builds(true, false, true, false), "--ignore-workspace");
-        assert!(!scaffolds_allow_builds(true, false, false, true), "the host owns allowBuilds");
+        assert!(scaffolds_allow_builds(true, false, false, false, true));
+        assert!(!scaffolds_allow_builds(false, false, false, false, true), "nothing was blocked");
+        assert!(!scaffolds_allow_builds(true, true, false, false, true), "a global install");
+        assert!(!scaffolds_allow_builds(true, false, true, false, true), "--ignore-workspace");
+        assert!(
+            !scaffolds_allow_builds(true, false, false, true, true),
+            "the host owns allowBuilds"
+        );
+        assert!(
+            !scaffolds_allow_builds(true, false, false, false, false),
+            "the host's settings file is not the engine's to edit"
+        );
     }
 }

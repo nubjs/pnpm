@@ -9,6 +9,15 @@
 //! and `trustPolicyExcludePrune` passes: they need the lockfile
 //! the install just wrote (the catalog write happens before the install
 //! so the resolver reads the new entries back), so they cannot ride along.
+//!
+//! Every write here is advisory, so a host that
+//! [writes no settings file](pnpm_config::Embedder::writes_settings_file)
+//! simply makes none of them: its catalogs and its exclude lists come from
+//! its own configuration and are pruned there. Declining costs the current
+//! run nothing, because the install resolves against the catalogs it was
+//! handed in memory rather than against what landed on disk — and nothing
+//! downstream reports the write, so no message is left claiming a change
+//! that did not happen.
 
 use derive_more::{Display, Error};
 use miette::Diagnostic;
@@ -57,6 +66,9 @@ pub(crate) fn write_workspace_catalogs(
     updated_catalogs: &Catalogs,
     current_manifest: &PackageManifest,
 ) -> Result<(), WriteWorkspaceCatalogsError> {
+    if !config.embedder.writes_settings_file {
+        return Ok(());
+    }
     if updated_catalogs.is_empty() && !config.catalog_prune {
         return Ok(());
     }
@@ -87,6 +99,9 @@ pub(crate) fn write_workspace_catalogs_selected(
     updated_catalogs: &Catalogs,
     projects: &[Project],
 ) -> Result<(), WriteWorkspaceCatalogsError> {
+    if !config.embedder.writes_settings_file {
+        return Ok(());
+    }
     if updated_catalogs.is_empty() && !config.catalog_prune {
         return Ok(());
     }
@@ -137,6 +152,9 @@ pub(crate) fn post_install_prune(
     workspace_dir: Option<&Path>,
     current_manifest: &PackageManifest,
 ) -> Result<(), WriteWorkspaceCatalogsError> {
+    if !config.embedder.writes_settings_file {
+        return Ok(());
+    }
     if !config.lockfile || !config.shares_one_lockfile() {
         return Ok(());
     }

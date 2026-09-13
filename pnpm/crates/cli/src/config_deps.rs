@@ -242,6 +242,24 @@ fn engine_resolve_options(config: &Config) -> Result<ResolveOptions> {
     })
 }
 
+/// `add --config` under a host whose `configDependencies` come from its own
+/// configuration. The declaration is the whole command — the install is
+/// reproducible only because the next run reads the specifier back — so this
+/// refuses rather than installing the packages against a declaration that
+/// lands nowhere.
+#[derive(Debug, derive_more::Display, derive_more::Error, miette::Diagnostic)]
+#[display(
+    "Config dependencies cannot be added for you, because {settings_file} is not this program's to write."
+)]
+#[diagnostic(
+    code(ERR_PNPM_CONFIG_DEPENDENCIES_NOT_WRITABLE),
+    help("Add them to configDependencies in {settings_file} by hand:\n  {specifiers}")
+)]
+pub struct ConfigDependenciesNotWritable {
+    settings_file: &'static str,
+    specifiers: String,
+}
+
 /// Add config dependencies: resolve + install them (merged with any
 /// already-declared config deps), then write the clean specifiers into
 /// `pnpm-workspace.yaml`'s `configDependencies` block. Backs
@@ -251,6 +269,20 @@ pub async fn add_config_dependencies<Reporter: self::Reporter>(
     root_dir: &Path,
     added: &BTreeMap<String, String>,
 ) -> Result<()> {
+    // Checked before the install, not after it: the packages would otherwise
+    // be fetched and materialized for a declaration nothing records.
+    if !config.embedder.writes_settings_file {
+        return Err(ConfigDependenciesNotWritable {
+            settings_file: config.embedder.settings_file_display_name,
+            specifiers: added
+                .iter()
+                .map(|(name, specifier)| format!("{name}: {specifier}"))
+                .collect::<Vec<_>>()
+                .join("\n  "),
+        }
+        .into());
+    }
+
     let mut config_dependencies = config.config_dependencies.clone().unwrap_or_default();
     for (name, specifier) in added {
         config_dependencies
