@@ -2074,6 +2074,7 @@ fn lay_out_slots<'l>(
         initial.packages.as_ref(),
         Some(allow_build_policy),
         Some(install.lockfile_dir),
+        Some(&initial.importers),
     );
     let dir_clone_cache = pnpm_deps_restorer::DirCloneCache::build(
         install.config,

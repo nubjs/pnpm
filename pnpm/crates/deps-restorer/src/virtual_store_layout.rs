@@ -34,8 +34,8 @@ use pnpm_graph_hasher::{
     format_global_virtual_store_path, join_global_virtual_store_path,
 };
 use pnpm_lockfile::{
-    LockfileResolution, PackageKey, PackageMetadata, PkgIdWithPatchHash, PkgVerPeer, SnapshotEntry,
-    VersionPart,
+    LockfileResolution, PackageKey, PackageMetadata, PkgIdWithPatchHash, PkgVerPeer,
+    ProjectSnapshot, SnapshotEntry, VersionPart,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -209,6 +209,7 @@ impl VirtualStoreLayout {
         packages: Option<&HashMap<PackageKey, PackageMetadata>>,
         allow_build_policy: Option<&AllowBuildPolicy>,
         lockfile_dir: Option<&Path>,
+        importers: Option<&HashMap<String, ProjectSnapshot>>,
     ) -> Self {
         // Pacquet keeps `virtual_store_dir` and `global_virtual_store_dir`
         // as two separate fields (see
@@ -244,7 +245,7 @@ impl VirtualStoreLayout {
             allow_build_policy,
             lockfile_dir,
         );
-        layout.apply_materialize_policy(config, snapshots, packages);
+        layout.apply_materialize_policy(config, snapshots, packages, importers);
         layout
     }
 
@@ -258,6 +259,7 @@ impl VirtualStoreLayout {
         config: &Config,
         snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
         packages: Option<&HashMap<PackageKey, PackageMetadata>>,
+        importers: Option<&HashMap<String, ProjectSnapshot>>,
     ) {
         let (Some(policy), Some(snapshots)) = (config.materialize_policy.as_deref(), snapshots)
         else {
@@ -267,6 +269,23 @@ impl VirtualStoreLayout {
         // resolving a dependency reference to the key it points at is
         // lockfile work, and the seam the policy sees is deliberately free
         // of lockfile types.
+        // Flattened here for the same reason the edges are: resolving a
+        // project's dependency reference to the package it points at is
+        // lockfile work, and the seam the policy sees is deliberately free
+        // of lockfile types.
+        let root_direct: HashSet<String> = importers
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, project)| {
+                project
+                    .dependencies
+                    .iter()
+                    .flatten()
+                    .chain(project.dev_dependencies.iter().flatten())
+                    .chain(project.optional_dependencies.iter().flatten())
+            })
+            .filter_map(|(name, spec)| Some(spec.version.resolved_key(name)?.pkg_id()))
+            .collect();
         let rows: Vec<(String, Vec<String>, Option<String>)> = snapshots
             .iter()
             .map(|(key, entry)| {
@@ -297,6 +316,7 @@ impl VirtualStoreLayout {
                 id,
                 dependencies,
                 index_key: index_key.as_deref(),
+                root_direct: root_direct.contains(id),
             })
             .collect();
         let keep_local = policy.materialize_locally(&resolved);
@@ -330,6 +350,7 @@ impl VirtualStoreLayout {
         packages: Option<&HashMap<PackageKey, PackageMetadata>>,
         allow_build_policy: Option<&AllowBuildPolicy>,
         lockfile_dir: Option<&Path>,
+        importers: Option<&HashMap<String, ProjectSnapshot>>,
     ) -> Self {
         let Some(snapshots) = snapshots.filter(|_| config.enable_global_virtual_store) else {
             return Self::new(
@@ -339,6 +360,7 @@ impl VirtualStoreLayout {
                 packages,
                 allow_build_policy,
                 lockfile_dir,
+                importers,
             );
         };
         let mut hasher =
@@ -367,13 +389,21 @@ impl VirtualStoreLayout {
                 Some(snapshots),
                 packages,
                 lockfile_dir,
+                importers,
             );
         }
         let gvs_suffixes = hasher.suffixes(snapshots);
         if let Some(cache_file) = cache_file {
             gvs_layout_cache::store(cache_file, &gvs_suffixes);
         }
-        Self::with_cached_suffixes(config, gvs_suffixes, Some(snapshots), packages, lockfile_dir)
+        Self::with_cached_suffixes(
+            config,
+            gvs_suffixes,
+            Some(snapshots),
+            packages,
+            lockfile_dir,
+            importers,
+        )
     }
 
     fn with_cached_suffixes(
@@ -382,6 +412,7 @@ impl VirtualStoreLayout {
         snapshots: Option<&HashMap<PackageKey, SnapshotEntry>>,
         packages: Option<&HashMap<PackageKey, PackageMetadata>>,
         lockfile_dir: Option<&Path>,
+        importers: Option<&HashMap<String, ProjectSnapshot>>,
     ) -> Self {
         let mut layout = VirtualStoreLayout {
             package_store_dir: config.global_virtual_store_dir.clone(),
@@ -393,7 +424,7 @@ impl VirtualStoreLayout {
         };
         // The cache stores the suffix map, which the policy does not
         // touch, so a cached layout still has to be narrowed here.
-        layout.apply_materialize_policy(config, snapshots, packages);
+        layout.apply_materialize_policy(config, snapshots, packages, importers);
         layout
     }
 
@@ -515,6 +546,7 @@ pub fn virtual_store_layout_for_lockfile(
     packages: Option<&HashMap<PackageKey, PackageMetadata>>,
     allow_build_policy: Option<&AllowBuildPolicy>,
     lockfile_dir: Option<&Path>,
+    importers: Option<&HashMap<String, ProjectSnapshot>>,
 ) -> VirtualStoreLayout {
     let engine = if config.enable_global_virtual_store {
         find_runtime_node_major(snapshots)
@@ -531,6 +563,7 @@ pub fn virtual_store_layout_for_lockfile(
         packages,
         allow_build_policy,
         lockfile_dir,
+        importers,
     )
 }
 

@@ -3796,6 +3796,7 @@ async fn fresh_partial_install_preserves_optional_link_in_warm_gvs_slot() {
         lockfile.packages.as_ref(),
         Some(&allow_build_policy),
         Some(&project_root),
+        None,
     );
     let linked_peer = layout.slot_dir(&snapshot_key).join("node_modules").join("@pnpm.e2e/peer-c");
     assert!(

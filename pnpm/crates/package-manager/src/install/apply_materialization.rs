@@ -239,6 +239,7 @@ async fn write_filtered_package_map(
         current.packages.as_ref(),
         Some(&allow_build_policy),
         Some(inputs.workspace_root),
+        Some(&current.importers),
     );
     crate::package_map::write_package_map(
         current,

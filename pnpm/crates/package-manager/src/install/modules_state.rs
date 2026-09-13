@@ -218,6 +218,7 @@ pub(super) fn gvs_build_marker_present(
         wanted.packages.as_ref(),
         Some(&policy),
         Some(lockfile_dir),
+        Some(&wanted.importers),
     );
     if crate::validate_virtual_store_slot_containment(wanted.snapshots.as_ref(), &layout).is_err() {
         return true;

@@ -161,6 +161,7 @@ async fn cold_batch_links_slots_in_parallel() {
         Some(&packages),
         Some(&allow_build_policy),
         None,
+        None,
     );
     let skipped = SkippedSnapshots::new();
     let logged_methods = AtomicU8::new(0);
@@ -299,6 +300,7 @@ async fn shared_store_context_materializes_a_warm_package() {
         Some(&snapshots),
         Some(&packages),
         Some(&allow_build_policy),
+        None,
         None,
     );
     let skipped = SkippedSnapshots::new();
@@ -477,6 +479,7 @@ impl SeededStoreInstall {
             Some(&self.packages),
             Some(&allow_build_policy),
             None,
+            None,
         );
         let skipped = SkippedSnapshots::new();
         let logged_methods = AtomicU8::new(0);
@@ -652,6 +655,7 @@ async fn gvs_link_pass_materializes_shared_slot_once() {
         Some(&snapshots),
         Some(&packages),
         Some(&allow_build_policy),
+        None,
         None,
     );
     assert_eq!(
@@ -1026,6 +1030,7 @@ fn gvs_layout(
         Some(packages),
         None,
         Some(lockfile_dir),
+        None,
     )
 }
 
@@ -1165,7 +1170,7 @@ fn group_slots_by_dir_is_identity_without_gvs() {
     config.enable_global_virtual_store = false;
     config.virtual_store_dir = std::path::PathBuf::from("/tmp/proj/node_modules/.pnpm");
     let config = config.leak();
-    let layout = crate::VirtualStoreLayout::new(config, None, None, None, None, None);
+    let layout = crate::VirtualStoreLayout::new(config, None, None, None, None, None, None);
 
     let snapshot = SnapshotEntry::default();
     let cas_paths = HashMap::new();

@@ -1124,6 +1124,7 @@ impl<'a> FrozenInputs<'a> {
             packages,
             Some(allow_build_policy),
             Some(install.workspace_root),
+            Some(&install.lockfile.importers),
         );
         tracing::info!(
             target: "pacquet::install::phase",

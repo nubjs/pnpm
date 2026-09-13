@@ -67,6 +67,22 @@ pub struct ResolvedPackage<'a> {
     /// Reading the store is how such a host reaches it anyway. `None` for
     /// a resolution with no store row to name — a directory or a link.
     pub index_key: Option<&'a str>,
+
+    /// Whether a project of the install depends on this package directly,
+    /// rather than reaching it through another package.
+    ///
+    /// A policy narrowing its own answer needs this: a package's import of
+    /// something it never declared resolves fine when the name is a direct
+    /// dependency of the importing project, because the project's own
+    /// `node_modules` already holds it. Distinguishing that case from a
+    /// genuinely unreachable one is the difference between keeping a
+    /// package project-local and leaving it shared, and nothing in the
+    /// dependency edges alone says which it is.
+    ///
+    /// `false` for every package when the install gives the layout no
+    /// importers to read — an install of its own internal packages, with
+    /// no project behind it.
+    pub root_direct: bool,
 }
 
 /// Decides which packages must be materialized in the project rather than

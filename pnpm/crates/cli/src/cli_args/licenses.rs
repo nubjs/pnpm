@@ -207,6 +207,7 @@ fn lockfile_layout(
         lockfile.packages.as_ref(),
         Some(&allow_build_policy),
         Some(lockfile_dir),
+        Some(&lockfile.importers),
     );
     validate_virtual_store_slot_containment(lockfile.snapshots.as_ref(), &layout)
         .into_diagnostic()?;

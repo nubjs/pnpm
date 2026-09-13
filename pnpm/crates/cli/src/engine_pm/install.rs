@@ -325,6 +325,10 @@ fn compute_engine_slot(
         // materializes the slot runs from a throwaway directory that
         // differs on every run.
         None,
+        // No project importers either, for the same reason: this install
+        // has no project behind it, so no package is anyone's direct
+        // dependency.
+        None,
     );
     Some(layout.slot_dir(&key))
 }

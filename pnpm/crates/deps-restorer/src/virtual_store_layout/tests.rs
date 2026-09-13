@@ -2,7 +2,8 @@ use super::{VirtualStoreLayout, global_virtual_store_version_dir};
 use pnpm_config::Config;
 use pnpm_lockfile::{
     DirectoryResolution, LockfileEntries, LockfileResolution, PackageKey, PackageMetadata, PkgName,
-    RegistryResolution, SnapshotDepRef, SnapshotEntry, TarballResolution,
+    ProjectSnapshot, RegistryResolution, ResolvedDependencySpec, SnapshotDepRef, SnapshotEntry,
+    TarballResolution,
 };
 use pretty_assertions::{assert_eq, assert_ne};
 use serde::Deserialize;
@@ -49,7 +50,7 @@ fn slot_dir_uses_flat_name_when_gvs_off() {
         PathBuf::from("/tmp/proj/node_modules/.pnpm"),
         PathBuf::from("/tmp/store/links"),
     );
-    let layout = VirtualStoreLayout::new(&config, Some("ignored"), None, None, None, None);
+    let layout = VirtualStoreLayout::new(&config, Some("ignored"), None, None, None, None, None);
     let key: PackageKey = "@scope/foo@1.2.3".parse().unwrap();
     assert_eq!(
         layout.slot_dir(&key),
@@ -95,6 +96,7 @@ fn slot_dir_uses_gvs_layout_when_gvs_on() {
         Some("darwin-arm64-node20"),
         Some(&snapshots),
         Some(&packages),
+        None,
         None,
         None,
     );
@@ -150,6 +152,7 @@ fn slot_dir_prefixes_unscoped_with_at_slash_under_gvs() {
         Some("linux-x64-node22"),
         Some(&snapshots),
         Some(&packages),
+        None,
         None,
         None,
     );
@@ -232,6 +235,7 @@ fn slot_dir_engine_agnostic_with_empty_allow_build_policy() {
         Some(&packages),
         Some(&policy),
         None,
+        None,
     )
     .slot_dir(&key);
     let linux = VirtualStoreLayout::new(
@@ -240,6 +244,7 @@ fn slot_dir_engine_agnostic_with_empty_allow_build_policy() {
         Some(&snapshots),
         Some(&packages),
         Some(&policy),
+        None,
         None,
     )
     .slot_dir(&key);
@@ -292,6 +297,7 @@ fn slot_dir_engine_specific_when_snapshot_is_built() {
         Some(&packages),
         Some(&policy),
         None,
+        None,
     )
     .slot_dir(&key);
     let linux = VirtualStoreLayout::new(
@@ -300,6 +306,7 @@ fn slot_dir_engine_specific_when_snapshot_is_built() {
         Some(&snapshots),
         Some(&packages),
         Some(&policy),
+        None,
         None,
     )
     .slot_dir(&key);
@@ -326,6 +333,7 @@ fn missing_metadata_keeps_source_dep_path_untrusted_for_gvs() {
         Some(&packages),
         Some(&policy),
         None,
+        None,
     )
     .slot_dir(&key);
     let linux = VirtualStoreLayout::new(
@@ -334,6 +342,7 @@ fn missing_metadata_keeps_source_dep_path_untrusted_for_gvs() {
         Some(&snapshots),
         Some(&packages),
         Some(&policy),
+        None,
         None,
     )
     .slot_dir(&key);
@@ -442,6 +451,7 @@ fn cross_pinning_siblings_get_distinct_slots() {
         Some(&snapshots),
         Some(&packages),
         Some(&policy),
+        None,
         None,
     );
     let slot_22 = layout.slot_dir(&pins_22);
@@ -584,6 +594,7 @@ fn directory_deps_get_a_slot_per_project() {
             Some(&packages),
             None,
             Some(Path::new(lockfile_dir)),
+            None,
         )
         .slot_dir(&key)
     };
@@ -686,6 +697,7 @@ fn link_hash_matches_the_shared_typescript_fixture() {
             Some(&packages),
             Some(&crate::AllowBuildPolicy::default()),
             Some(Path::new(&case.lockfile_dir)),
+            None,
         )
         .slot_dir(&package_key);
         let relative_slot = slot
@@ -741,6 +753,7 @@ fn snapshots_with_link_deps_get_a_slot_per_link_target() {
             Some(&packages),
             None,
             Some(Path::new("/home/user/proj")),
+            None,
         )
         .slot_dir(&key)
     };
@@ -783,6 +796,7 @@ fn link_targets_propagate_through_transitive_ancestor_slots() {
             Some(&packages),
             None,
             Some(Path::new("/home/user/proj")),
+            None,
         );
         (layout.slot_dir(&parent_key), layout.slot_dir(&child_key))
     };
@@ -811,6 +825,7 @@ fn link_dependency_alias_participates_in_the_slot_hash() {
             Some(&packages),
             None,
             Some(Path::new("/home/user/proj")),
+            None,
         )
         .slot_dir(&key)
     };
@@ -857,6 +872,7 @@ fn link_deps_resolving_to_one_directory_share_a_slot_across_projects() {
             Some(&packages),
             None,
             Some(Path::new(lockfile_dir)),
+            None,
         )
         .slot_dir(&key)
     };
@@ -899,6 +915,7 @@ fn snapshots_without_link_deps_keep_their_slot() {
             Some(&packages),
             None,
             Some(Path::new(lockfile_dir)),
+            None,
         )
         .slot_dir(&key)
     };
@@ -1055,6 +1072,7 @@ fn cyclic_slot_suffixes() -> Vec<(String, String)> {
         Some(&snapshots),
         Some(&packages),
         Some(&policy),
+        None,
         None,
     );
     let mut suffixes: Vec<(String, String)> = snapshots
@@ -1452,6 +1470,7 @@ fn the_materialize_policy_is_given_each_package_s_store_index_key() {
         Some(&packages),
         None,
         None,
+        None,
     );
 
     let seen = policy.0.lock().expect("read what the policy was given").clone();
@@ -1501,6 +1520,7 @@ fn the_cached_layout_gives_the_policy_the_same_store_index_keys() {
         Some(&packages),
         None,
         None,
+        None,
     );
 
     let seen = policy.0.lock().expect("read what the policy was given").clone();
@@ -1509,6 +1529,102 @@ fn the_cached_layout_gives_the_policy_the_same_store_index_keys() {
         bar.1.as_deref().is_some_and(|key| key.contains("bar@4.5.6")),
         "the cached path must carry the store-index key too, got {:?}",
         bar.1,
+    );
+}
+
+/// Keeps nothing, and records whether each package was reported as a
+/// direct dependency of a project, so a test can assert the policy could
+/// tell the two apart at all.
+#[derive(Debug, Default)]
+struct RecordsRootDirect(std::sync::Mutex<Vec<(String, bool)>>);
+
+impl pnpm_store_dir::MaterializePolicy for RecordsRootDirect {
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> std::collections::HashSet<String> {
+        let mut seen: Vec<(String, bool)> =
+            resolved.iter().map(|package| (package.id.to_owned(), package.root_direct)).collect();
+        seen.sort();
+        *self.0.lock().expect("record what the policy was given") = seen;
+        std::collections::HashSet::new()
+    }
+}
+
+/// One project depending on `bar` and not on `@scope/foo`.
+fn importers_naming_bar() -> HashMap<String, ProjectSnapshot> {
+    let mut dependencies = HashMap::new();
+    dependencies.insert(
+        PkgName::parse("bar").expect("parse pkg name"),
+        ResolvedDependencySpec {
+            specifier: "^4.0.0".to_string(),
+            version: "4.5.6".parse().expect("parse importer dep version"),
+        },
+    );
+    let mut importers = HashMap::new();
+    importers.insert(
+        ".".to_string(),
+        ProjectSnapshot { dependencies: Some(dependencies), ..ProjectSnapshot::default() },
+    );
+    importers
+}
+
+/// A policy narrowing its own answer has to tell a package a project
+/// depends on directly from one it only reaches through another package:
+/// an undeclared import resolves fine when the name is already in the
+/// project's own `node_modules`, and nothing in the edges between
+/// packages says whether it is.
+#[test]
+fn the_materialize_policy_is_told_which_packages_a_project_depends_on_directly() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let policy = std::sync::Arc::new(RecordsRootDirect::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+
+    let _ = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+        Some(&importers_naming_bar()),
+    );
+
+    let seen = policy.0.lock().expect("read what the policy was given").clone();
+    assert_eq!(
+        seen,
+        vec![("@scope/foo@1.2.3".to_string(), false), ("bar@4.5.6".to_string(), true)],
+        "only the package a project names may be reported as a direct dependency",
+    );
+}
+
+/// An install with no project behind it — pnpm's own engine packages, for
+/// one — passes no importers, and every package is then reported the same
+/// way rather than guessed at.
+#[test]
+fn no_importers_means_no_package_is_a_direct_dependency() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let policy = std::sync::Arc::new(RecordsRootDirect::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+
+    let _ = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    let seen = policy.0.lock().expect("read what the policy was given").clone();
+    assert!(
+        seen.iter().all(|(_, root_direct)| !root_direct),
+        "with no importers nothing may be reported as a direct dependency, got {seen:?}",
     );
 }
 
@@ -1566,6 +1682,7 @@ fn the_materialize_policy_is_given_the_graph_it_reasons_about() {
         None,
         None,
         None,
+        None,
     );
 
     for id in ["bar@4.5.6", "@scope/foo@1.2.3"] {
@@ -1589,6 +1706,7 @@ fn the_materialize_policy_moves_only_the_named_package_into_the_project() {
         &config,
         Some("darwin-arm64-node20"),
         Some(&snapshots),
+        None,
         None,
         None,
         None,
@@ -1623,6 +1741,7 @@ fn a_locally_materialized_package_has_no_canonical_shared_slot() {
         None,
         None,
         None,
+        None,
     );
 
     assert_eq!(layout.hashed_slot_dir(&"@scope/foo@1.2.3".parse().unwrap()), None);
@@ -1639,6 +1758,7 @@ fn without_a_policy_every_package_keeps_the_shared_store() {
         &config,
         Some("darwin-arm64-node20"),
         Some(&snapshots),
+        None,
         None,
         None,
         None,
