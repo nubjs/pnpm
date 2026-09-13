@@ -23,6 +23,7 @@ use derive_more::{Display, Error};
 use miette::Diagnostic;
 use pnpm_resolving_resolver_base::{PreferredVersions, VersionSelectorEntry, VersionSelectorType};
 
+mod bun;
 mod npm;
 mod yarn;
 
@@ -35,6 +36,10 @@ pub const NPM_LOCKFILE_NAME: &str = "package-lock.json";
 /// npm's publishable lockfile name, read when [`NPM_LOCKFILE_NAME`] is
 /// absent.
 pub const NPM_SHRINKWRAP_NAME: &str = "npm-shrinkwrap.json";
+
+/// bun's text lockfile. bun also writes a binary `bun.lockb`, which carries
+/// no versions this can read.
+pub const BUN_LOCKFILE_NAME: &str = "bun.lock";
 
 /// Every version string a foreign lockfile associates with a package
 /// name. A value is usually a concrete version, but npm's flat format
@@ -112,6 +117,16 @@ pub fn read_foreign_lockfile_versions(
             collect_npm_lockfile_versions(&lockfile, &mut versions);
             return Ok(versions);
         }
+    }
+
+    let bun_lockfile_path = dir.join(BUN_LOCKFILE_NAME);
+    if let Some(contents) = read_if_exists(&bun_lockfile_path)? {
+        // Last, so a project holding both keeps whichever one pnpm already
+        // preferred. bun.lock is JSONC, which serde_json will not take.
+        let lockfile = serde_json::from_str(&bun::strip_trailing_commas(&contents))
+            .map_err(|source| ImportLockfileError::Parse { path: bun_lockfile_path, source })?;
+        bun::collect_bun_lockfile_versions(&lockfile, &mut versions);
+        return Ok(versions);
     }
 
     Err(ImportLockfileError::LockfileNotFound)
