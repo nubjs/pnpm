@@ -715,8 +715,15 @@ fn report_install_completion<Reporter: self::Reporter>(
     // than recalling the `allowBuilds` shape. Written before the strict
     // failure below, which is the very run whose message it answers.
     // `--ignore-workspace` opts out: the run disowned the workspace
-    // manifest, so it must not write to one either.
-    if !inputs.ignored_builds.is_empty() && !is_global_install && !inputs.config.ignore_workspace {
+    // manifest, so it must not write to one either. So does a host that
+    // keeps `allowBuilds` somewhere of its own: the line would be left in
+    // a file it never reads, and the file's mere existence may mean
+    // something to the host that this run cannot know.
+    if !inputs.ignored_builds.is_empty()
+        && !is_global_install
+        && !inputs.config.ignore_workspace
+        && inputs.config.embedder.allow_builds_writer.is_none()
+    {
         let allow_build_keys: BTreeSet<String> = inputs
             .ignored_builds
             .iter()

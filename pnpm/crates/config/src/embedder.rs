@@ -103,14 +103,18 @@ pub struct Embedder {
     pub compat_package_extensions:
         Option<&'static indexmap::IndexMap<String, crate::PackageExtension>>,
 
-    /// Where `approve-builds` records what the user decided. pnpm writes
-    /// `allowBuilds` into its workspace manifest; a host that reads no such
-    /// file has to keep the decision somewhere it will read back, or the
-    /// next install asks the same question again.
+    /// Where `allowBuilds` lives for this host. pnpm keeps it in its
+    /// workspace manifest, writing the user's `approve-builds` answer there
+    /// and scaffolding a line to edit for every build an install blocked. A
+    /// host that reads no such file has to keep the answer somewhere it
+    /// will read back, or the next install asks the same question again —
+    /// and the manifest must not be written behind its back, since the file
+    /// may mean something to the host that the engine cannot know.
     ///
-    /// The host is handed the directory the decision belongs to and the
-    /// decided packages, each with whether its scripts may run, and is
-    /// responsible for merging them into whatever it already had.
+    /// Supplying one moves both writes: the host is handed the directory
+    /// the decision belongs to and the decided packages, each with whether
+    /// its scripts may run, and merges them into whatever it already had;
+    /// nothing scaffolds the engine's own manifest.
     pub allow_builds_writer: Option<AllowBuildsWriter>,
 }
 
