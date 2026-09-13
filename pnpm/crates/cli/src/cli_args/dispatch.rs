@@ -49,6 +49,11 @@ pub(crate) struct RunCtx<'a> {
     /// the local prefix [`Self::dir`] resolves to.
     pub(crate) cli_dir: &'a Path,
     pub(crate) manifest_path: &'a Path,
+    /// The profile the host runs the engine under. Carried here so a
+    /// command that fails before any `Config` is loaded can still speak
+    /// in the host's name — loading one to answer "that is not a
+    /// command" would let an unrelated config error mask the real one.
+    pub(crate) embedder: pnpm_config::Embedder,
     pub(crate) reporter: ReporterType,
     pub(crate) recursive: bool,
     pub(crate) recursive_resume_from: Option<&'a str>,
@@ -264,6 +269,7 @@ impl CliArgs {
             dir: &anchors.dir,
             cli_dir: &anchors.cli_dir,
             manifest_path: &anchors.manifest_path,
+            embedder: self.embedder,
             reporter: setup.reporter,
             recursive: self.recursive,
             recursive_resume_from: self.resume_from.as_deref(),
@@ -665,7 +671,7 @@ fn route_registry<'a>(command: CliCommand, ctx: &RunCtx<'a>) -> miette::Result<C
         CliCommand::Ping(args) => dispatch_query::ping(ctx, args),
         CliCommand::Search(args) => dispatch_query::search(ctx, args),
         CliCommand::Publish(args) => dispatch_query::publish(ctx, args),
-        CliCommand::Token(_) => dispatch_query::not_implemented("token"),
+        CliCommand::Token(_) => dispatch_query::not_implemented(ctx, "token"),
         CliCommand::Docs(args) => dispatch_query::docs(ctx, args),
         CliCommand::Repo(args) => dispatch_query::repo(ctx, args),
         CliCommand::Login(args) => dispatch_query::login(ctx, args),
@@ -686,9 +692,9 @@ fn route_project<'a>(command: CliCommand, ctx: &RunCtx<'a>) -> miette::Result<Co
         CliCommand::Stop(args) => dispatch_script::stop(ctx, args),
         CliCommand::Restart(args) => dispatch_script::restart(ctx, args),
         CliCommand::Pkg(args) => dispatch_script::pkg(ctx, args),
-        CliCommand::Edit(_) => dispatch_query::not_implemented("edit"),
-        CliCommand::Profile(_) => dispatch_query::not_implemented("profile"),
-        CliCommand::Xmas(_) => dispatch_query::not_implemented("xmas"),
+        CliCommand::Edit(_) => dispatch_query::not_implemented(ctx, "edit"),
+        CliCommand::Profile(_) => dispatch_query::not_implemented(ctx, "profile"),
+        CliCommand::Xmas(_) => dispatch_query::not_implemented(ctx, "xmas"),
         command => route_maintenance(command, ctx),
     }
 }

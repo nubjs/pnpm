@@ -19,12 +19,22 @@ pub struct NotImplementedArgs {
 
 /// The one outcome of an unimplemented command. `command` is the name pnpm
 /// registered, not an alias the user typed — these commands have none.
+///
+/// `program` names the program the sentence is about, so an embedder's
+/// users are told which command *they* ran is unimplemented rather than
+/// being pointed at a program they have never installed. It is the only
+/// part of the message that moves: npm is named because npm is where the
+/// command actually lives, which is true whoever asks.
 #[derive(Debug, Display, Error, Diagnostic)]
 #[display(
-    r#"The "{command}" command is not yet implemented in pnpm. Use the npm CLI directly: npm {command}"#
+    r#"The "{command}" command is not yet implemented in {program}. Use the npm CLI directly: npm {command}"#
 )]
 #[diagnostic(code(ERR_PNPM_NOT_IMPLEMENTED))]
 pub struct NotImplementedError {
     #[error(not(source))]
     pub command: &'static str,
+    pub program: &'static str,
 }
+
+#[cfg(test)]
+mod tests;

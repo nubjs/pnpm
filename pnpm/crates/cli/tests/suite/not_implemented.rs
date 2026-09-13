@@ -17,6 +17,9 @@ fn the_unimplemented_npm_commands_point_at_the_npm_cli() {
         assert!(!output.status.success(), "pacquet {command} must fail");
         assert!(stderr.contains("ERR_PNPM_NOT_IMPLEMENTED"), "{command}: {stderr}");
         assert!(stderr.contains(&format!("npm {command}")), "{command}: {stderr}");
+        // The program the sentence names comes from the profile, so this
+        // pins the standalone binary's own answer to it.
+        assert!(stderr.contains("not yet implemented in pnpm"), "{command}: {stderr}");
 
         drop(root);
     }

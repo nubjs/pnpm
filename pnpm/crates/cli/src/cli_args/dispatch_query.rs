@@ -603,8 +603,11 @@ pub(super) fn config_set<'a>(
     config(ctx, ConfigArgs { flags: args.flags, command: ConfigSubcommand::Set(args.args) })
 }
 
-pub(super) fn not_implemented<'a>(command: &'static str) -> miette::Result<CommandFuture<'a>> {
-    Err(NotImplementedError { command }.into())
+pub(super) fn not_implemented<'a>(
+    ctx: &RunCtx<'a>,
+    command: &'static str,
+) -> miette::Result<CommandFuture<'a>> {
+    Err(NotImplementedError { command, program: ctx.embedder.program_name }.into())
 }
 
 // `pack-app` reads `pnpm.app` from package.json, resolves a Node.js version
