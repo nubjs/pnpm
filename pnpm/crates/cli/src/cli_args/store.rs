@@ -21,7 +21,7 @@ pub enum StoreCommand {
     /// Returns exit code 0 if the content of the package is the same as it
     /// was at the time of unpacking.
     Status,
-    /// Functionally equivalent to pnpm add, except this adds new packages to the store directly
+    /// Functionally equivalent to `add`, except this adds new packages to the store directly
     /// without modifying any projects or files outside of the store.
     Add(StoreAddArgs),
     /// Removes unreferenced packages from the store.

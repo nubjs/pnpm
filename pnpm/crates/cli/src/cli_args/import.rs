@@ -11,7 +11,7 @@ use pnpm_reporter::Reporter;
 #[derive(Debug, Args)]
 pub struct ImportArgs {
     /// URL of a pnpr server. Accepted for symmetry with the other
-    /// installing commands; `pnpm import` always resolves locally.
+    /// installing commands; `import` always resolves locally.
     // TODO: offloading import to pnpr requires uploading the lockfile or the
     // preferred versions it yields. Worth a follow up, but for now, since
     // import is an infrequent command, resolving locally is okay.

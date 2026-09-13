@@ -25,7 +25,7 @@ use std::{
 
 #[derive(Debug, Args)]
 pub struct PatchCommitArgs {
-    /// Directory created by `pnpm patch`.
+    /// Directory created by the `patch` command.
     pub patch_dir: PathBuf,
     /// The generated patch file will be saved to this directory.
     #[clap(long = "patches-dir", value_name = "dir")]
