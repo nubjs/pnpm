@@ -14,7 +14,11 @@
 //! on the store, and neither depends on the other.
 
 use crate::store_index::PackageFilesIndex;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// What one extraction wrote into the store.
 pub struct ExtractedPackage<'a> {
@@ -45,6 +49,17 @@ pub trait ExtractObserver: std::fmt::Debug + Send + Sync {
 /// An observer an install carries, if its host registered one.
 pub type SharedExtractObserver = Option<Arc<dyn ExtractObserver>>;
 
+/// One package an install resolved, as a policy sees it.
+pub struct ResolvedPackage<'a> {
+    /// The install's `"{name}@{version}"` identifier.
+    pub id: &'a str,
+
+    /// The identifiers of the packages this one imports, spelled the same
+    /// way. A dependency that resolves to a link rather than to a package
+    /// of its own is absent, having no identifier to name.
+    pub dependencies: &'a [String],
+}
+
 /// Decides which packages must be materialized in the project rather than
 /// in a store shared across projects.
 ///
@@ -55,14 +70,19 @@ pub type SharedExtractObserver = Option<Arc<dyn ExtractObserver>>;
 /// analysis artifact — names that package here and the install gives it a
 /// project-local directory instead.
 ///
-/// Asked once per package while the layout is built, so an implementation
-/// is consulted a bounded number of times and may be as expensive as a map
-/// lookup. pnpm sets no policy, and without one every package takes the
-/// shared layout, which is the behavior this replaces nothing of.
+/// Asked ONCE, with everything the install resolved and who imports whom,
+/// because keeping a package out of the shared store is only sound if
+/// everything that imports it is kept out too: a store-resident importer
+/// would go on resolving the shared copy, and the package would exist
+/// twice at two real paths. A policy that has to reason about that needs
+/// the graph, and asking package by package cannot give it one.
+///
+/// pnpm sets no policy, and without one every package takes the shared
+/// layout, which is the behavior this replaces nothing of.
 pub trait MaterializePolicy: std::fmt::Debug + Send + Sync {
-    /// `true` when `package_id` — the install's `"{name}@{version}"`
-    /// identifier — must not be shared between projects.
-    fn materialize_locally(&self, package_id: &str) -> bool;
+    /// The identifiers, among `resolved`, that must not be shared between
+    /// projects. An identifier that names nothing in `resolved` is ignored.
+    fn materialize_locally(&self, resolved: &[ResolvedPackage<'_>]) -> HashSet<String>;
 }
 
 /// A materialization policy an install carries, if its host set one.

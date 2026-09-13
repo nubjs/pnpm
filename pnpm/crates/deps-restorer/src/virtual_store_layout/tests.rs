@@ -1374,8 +1374,15 @@ fn layout_cache_load_rejects_a_map_it_cannot_vouch_for() {
 struct MaterializeOnly(&'static str);
 
 impl pnpm_store_dir::MaterializePolicy for MaterializeOnly {
-    fn materialize_locally(&self, package_id: &str) -> bool {
-        package_id == self.0
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> std::collections::HashSet<String> {
+        resolved
+            .iter()
+            .filter(|package| package.id == self.0)
+            .map(|package| package.id.to_owned())
+            .collect()
     }
 }
 
@@ -1391,6 +1398,72 @@ fn two_package_gvs_fixture() -> (Config, HashMap<PackageKey, SnapshotEntry>) {
         snapshots.insert(id.parse::<PackageKey>().unwrap(), SnapshotEntry::default());
     }
     (config, snapshots)
+}
+
+/// Keeps one package and everything that imports it, which is the shape a
+/// policy needs and the reason it is handed the graph: a package kept out
+/// of the shared store is only sound if its importers are kept out too.
+#[derive(Debug)]
+struct KeepWithImporters(&'static str);
+
+impl pnpm_store_dir::MaterializePolicy for KeepWithImporters {
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> std::collections::HashSet<String> {
+        let mut keep: std::collections::HashSet<String> =
+            std::iter::once(self.0.to_owned()).collect();
+        // One pass covers the fixture's single edge; a real policy walks
+        // to a fixed point.
+        for package in resolved {
+            if package.dependencies.iter().any(|dep| keep.contains(dep)) {
+                keep.insert(package.id.to_owned());
+            }
+        }
+        keep
+    }
+}
+
+/// The same two packages, with the sibling importing the named one.
+fn two_package_gvs_fixture_with_an_edge() -> (Config, HashMap<PackageKey, SnapshotEntry>) {
+    let (config, mut snapshots) = two_package_gvs_fixture();
+    let mut dependencies = HashMap::new();
+    dependencies.insert(
+        PkgName::parse("bar").expect("parse pkg name"),
+        SnapshotDepRef::Plain("4.5.6".parse().expect("parse ver-peer")),
+    );
+    snapshots.insert(
+        "@scope/foo@1.2.3".parse::<PackageKey>().unwrap(),
+        SnapshotEntry { dependencies: Some(dependencies), ..SnapshotEntry::default() },
+    );
+    (config, snapshots)
+}
+
+/// The policy is asked once with every resolved package and the edges
+/// between them, so it can keep a package's importers out of the shared
+/// store alongside it. Naming only `bar` takes `@scope/foo` with it,
+/// which a policy asked one identifier at a time could not decide.
+#[test]
+fn the_materialize_policy_is_given_the_graph_it_reasons_about() {
+    let (mut config, snapshots) = two_package_gvs_fixture_with_an_edge();
+    config.materialize_policy = Some(std::sync::Arc::new(KeepWithImporters("bar@4.5.6")));
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+    );
+
+    for id in ["bar@4.5.6", "@scope/foo@1.2.3"] {
+        let key: PackageKey = id.parse().unwrap();
+        assert!(
+            layout.slot_dir(&key).starts_with("/tmp/proj"),
+            "{id} must be project-local, got {:?}",
+            layout.slot_dir(&key),
+        );
+    }
 }
 
 /// A package the policy names gets a project-local slot, while its

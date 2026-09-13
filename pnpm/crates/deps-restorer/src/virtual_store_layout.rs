@@ -262,11 +262,30 @@ impl VirtualStoreLayout {
         else {
             return;
         };
-        self.locally_materialized = snapshots
-            .keys()
-            .filter(|key| policy.materialize_locally(&key.pkg_id()))
-            .cloned()
+        // The edges are flattened here rather than in the policy because
+        // resolving a dependency reference to the key it points at is
+        // lockfile work, and the seam the policy sees is deliberately free
+        // of lockfile types.
+        let edges: Vec<(String, Vec<String>)> = snapshots
+            .iter()
+            .map(|(key, entry)| {
+                let dependencies = entry
+                    .dependencies
+                    .iter()
+                    .flatten()
+                    .chain(entry.optional_dependencies.iter().flatten())
+                    .filter_map(|(name, dep)| Some(dep.resolve(name)?.pkg_id()))
+                    .collect();
+                (key.pkg_id(), dependencies)
+            })
             .collect();
+        let resolved: Vec<pnpm_store_dir::ResolvedPackage<'_>> = edges
+            .iter()
+            .map(|(id, dependencies)| pnpm_store_dir::ResolvedPackage { id, dependencies })
+            .collect();
+        let keep_local = policy.materialize_locally(&resolved);
+        self.locally_materialized =
+            snapshots.keys().filter(|key| keep_local.contains(&key.pkg_id())).cloned().collect();
         if !self.locally_materialized.is_empty() {
             self.local_store_dir = Some(config.virtual_store_dir.clone());
         }
