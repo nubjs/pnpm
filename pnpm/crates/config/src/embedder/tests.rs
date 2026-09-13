@@ -19,6 +19,7 @@ const NUB: Embedder = Embedder {
     allow_builds_writer: None,
     extract_observer: None,
     materialize_policy: None,
+    settings_file_display_name: "nub.jsonc",
 };
 
 #[test]
@@ -401,4 +402,23 @@ fn embedder_legacy_lockfile_names_reach_the_loader_selection() {
     // pnpm's own profile carries none, so standalone pnpm still reads
     // exactly the one file it always did.
     assert!(Config::default().wanted_lockfile_selection().legacy_file_names.is_empty());
+}
+
+/// A host's own settings file is what the maturity-gate diagnostics name, and
+/// pnpm's wording is unchanged when no host overrides it.
+///
+/// The gate's four messages tell the user to add an entry to
+/// `minimumReleaseAgeExclude`, which is only actionable if the file named is
+/// one the running program actually reads. An embedder that resolves its own
+/// configuration reads no `pnpm-workspace.yaml`, so naming it would send the
+/// user to edit a file that changes nothing.
+#[test]
+fn the_settings_file_a_diagnostic_names_comes_from_the_profile() {
+    assert_eq!(Embedder::PNPM.settings_file_display_name, "pnpm-workspace.yaml");
+    assert_eq!(Embedder::default().settings_file_display_name, "pnpm-workspace.yaml");
+
+    // A host that resolves its own settings names its own file, which is the
+    // whole point: NUB reads no `pnpm-workspace.yaml`, so a diagnostic naming
+    // one would be advice its user cannot act on.
+    assert_eq!(NUB.settings_file_display_name, "nub.jsonc");
 }

@@ -17,7 +17,7 @@ use pnpm_resolving_npm_resolver::MINIMUM_RELEASE_AGE_VIOLATION_CODE;
 #[derive(Debug, Display, Error, Diagnostic)]
 pub enum MinimumReleaseAgeError {
     #[display(
-        "minimumReleaseAgeStrict cannot be combined with --no-save: approval would require writing to minimumReleaseAgeExclude in pnpm-workspace.yaml, which --no-save prevents."
+        "minimumReleaseAgeStrict cannot be combined with --no-save: approval would require writing to minimumReleaseAgeExclude in {settings_file}, which --no-save prevents."
     )]
     #[diagnostic(
         code(ERR_PNPM_STRICT_MIN_RELEASE_AGE_REQUIRES_SAVE),
@@ -25,15 +25,15 @@ pub enum MinimumReleaseAgeError {
             "Drop --no-save so the exclude list can be persisted, or set minimumReleaseAgeStrict: false."
         )
     )]
-    StrictRequiresSave,
+    StrictRequiresSave { settings_file: &'static str },
 
     #[diagnostic(
         code(ERR_PNPM_NO_MATURE_MATCHING_VERSION),
         help(
-            "Run the install interactively to approve these picks, add them to minimumReleaseAgeExclude in pnpm-workspace.yaml, or wait for the packages to mature."
+            "Run the install interactively to approve these picks, add them to minimumReleaseAgeExclude in {settings_file}, or wait for the packages to mature."
         )
     )]
-    NoMatureMatchingVersion { message: String },
+    NoMatureMatchingVersion { message: String, settings_file: &'static str },
 
     #[display("Aborted: the immature versions were not approved.")]
     #[diagnostic(
@@ -63,7 +63,9 @@ pub(crate) fn ensure_strict_minimum_release_age_can_save(
         && config.resolved_minimum_release_age().is_some()
         && config.resolved_minimum_release_age_strict()
     {
-        return Err(MinimumReleaseAgeError::StrictRequiresSave);
+        return Err(MinimumReleaseAgeError::StrictRequiresSave {
+            settings_file: config.embedder.settings_file_display_name,
+        });
     }
     Ok(())
 }
@@ -129,16 +131,18 @@ where
             workspace_dir,
             &immature,
             "(set minimumReleaseAgeStrict to true to gate these updates with a prompt)",
+            config.embedder.settings_file_display_name,
         );
     }
 
     if !can_prompt {
         return Err(MinimumReleaseAgeError::NoMatureMatchingVersion {
             message: format_violation_error(&immature),
+            settings_file: config.embedder.settings_file_display_name,
         });
     }
 
-    let message = format_prompt(&immature);
+    let message = format_prompt(&immature, config.embedder.settings_file_display_name);
     let confirmed = {
         let _guard = PromptGuard::<ReporterImpl>::new();
         prompt.confirm(&message).await.map_err(MinimumReleaseAgeError::Prompt)?
@@ -159,6 +163,7 @@ where
         workspace_dir,
         &immature,
         "(approved at the prompt)",
+        config.embedder.settings_file_display_name,
     )
 }
 
@@ -166,6 +171,7 @@ fn persist_and_report_excludes<ReporterImpl: Reporter>(
     workspace_dir: &Path,
     immature: &[&ResolutionPolicyViolation],
     reason: &str,
+    settings_file: &str,
 ) -> Result<(), MinimumReleaseAgeError> {
     let added: Vec<String> = immature
         .iter()
@@ -185,7 +191,7 @@ fn persist_and_report_excludes<ReporterImpl: Reporter>(
     ReporterImpl::emit(&LogEvent::Pnpm(PnpmLog {
         level: LogLevel::Info,
         message: format!(
-            "Added {} {} to minimumReleaseAgeExclude in pnpm-workspace.yaml {reason}:\n  {}",
+            "Added {} {} to minimumReleaseAgeExclude in {settings_file} {reason}:\n  {}",
             added.len(),
             if added.len() == 1 { "entry" } else { "entries" },
             added.join("\n  "),
@@ -222,9 +228,9 @@ fn format_violation_error(violations: &[&ResolutionPolicyViolation]) -> String {
     )
 }
 
-fn format_prompt(violations: &[&ResolutionPolicyViolation]) -> String {
+fn format_prompt(violations: &[&ResolutionPolicyViolation], settings_file: &str) -> String {
     format!(
-        "{} {} not meet the minimumReleaseAge constraint:\n{}\nAdd to minimumReleaseAgeExclude in pnpm-workspace.yaml and proceed with the install?",
+        "{} {} not meet the minimumReleaseAge constraint:\n{}\nAdd to minimumReleaseAgeExclude in {settings_file} and proceed with the install?",
         violations.len(),
         if violations.len() == 1 { "version does" } else { "versions do" },
         violations

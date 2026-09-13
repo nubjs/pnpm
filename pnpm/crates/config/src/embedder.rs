@@ -83,6 +83,20 @@ pub struct Embedder {
     /// still wins.
     pub virtual_store_dirname: &'static str,
 
+    /// The name this host tells the user to edit when a setting has to be
+    /// changed by hand.
+    ///
+    /// Every diagnostic that asks for a settings edit — the
+    /// `minimumReleaseAgeExclude` prompts above all — has to name a real file,
+    /// and under an embedder that resolves its own configuration the file pnpm
+    /// would name is one the host never reads and never writes. Naming it
+    /// sends the user to edit a file that changes nothing, which is worse than
+    /// saying nothing at all.
+    ///
+    /// Defaults to `pnpm-workspace.yaml`, so standalone pnpm's wording is
+    /// unchanged.
+    pub settings_file_display_name: &'static str,
+
     /// Whether the engine reads the configuration only pnpm defines: the
     /// `pnpm-workspace.yaml` search, the global `config.yaml` and `auth.ini`,
     /// `pnpm_config_*` / `PNPM_CONFIG_*` environment variables, and the
@@ -174,6 +188,7 @@ impl Embedder {
         lockfile_basename: pnpm_lockfile::Lockfile::FILE_NAME,
         lockfile_legacy_basenames: &[],
         virtual_store_dirname: ".pnpm",
+        settings_file_display_name: "pnpm-workspace.yaml",
         reads_pnpm_config: true,
         workspace_settings: None,
         compat_package_extensions: None,

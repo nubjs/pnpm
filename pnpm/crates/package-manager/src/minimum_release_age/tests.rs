@@ -102,7 +102,7 @@ fn strict_no_save_is_rejected_before_resolution() {
     let error = ensure_strict_minimum_release_age_can_save(&config, false)
         .expect_err("strict mode requires persistence");
 
-    assert!(matches!(error, MinimumReleaseAgeError::StrictRequiresSave));
+    assert!(matches!(error, MinimumReleaseAgeError::StrictRequiresSave { .. }));
     assert_eq!(
         error.to_string(),
         "minimumReleaseAgeStrict cannot be combined with --no-save: approval would require writing to minimumReleaseAgeExclude in pnpm-workspace.yaml, which --no-save prevents.",
