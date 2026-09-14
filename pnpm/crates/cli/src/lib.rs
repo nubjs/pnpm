@@ -16,7 +16,7 @@ mod engine_pm;
 mod executable_link;
 mod flag_relocation;
 mod github_actions;
-mod help_program_name;
+mod help_host_names;
 mod host_command;
 mod install_as_add;
 mod leading_separator;
@@ -38,7 +38,7 @@ use clap::{CommandFactory, FromArgMatches};
 use cli_args::CliArgs;
 use config_overrides::ConfigOverrides;
 use flag_relocation::relocate_pre_subcommand_flags;
-use help_program_name::with_program_name;
+use help_host_names::with_host_names;
 use miette::set_panic_hook;
 use pnpm_diagnostics::{enable_tracing_by_env, install_report_handler};
 use state::State;
@@ -361,7 +361,7 @@ fn prepare_cli_argv(
         .bin_name(embedder.program_name);
     // `name`/`bin_name` move the usage line; the prose does not follow on its
     // own, and help never reaches the reporter a host can hook.
-    let command = with_program_name(command, embedder.program_name);
+    let command = with_host_names(command, &embedder);
     let argv = shorthands::expand_universal_shorthands(&command, argv);
     let argv = boolean_values::resolve_boolean_values(argv);
     let argv = renamed_options::drop_shadowed_aliases(&command, argv);
