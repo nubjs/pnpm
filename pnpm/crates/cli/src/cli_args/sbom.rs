@@ -15,7 +15,7 @@ use crate::{
 };
 use clap::Args;
 use indexmap::IndexMap;
-use pnpm_config::Config;
+use pnpm_config::{Config, Embedder};
 use pnpm_lockfile::{
     LazyLockfile, Lockfile, LockfileResolution, PackageKey, PackageMetadata, PkgName,
     PkgNameVerPeer, SnapshotEntry,
@@ -1144,7 +1144,10 @@ impl SbomArgs {
             filter_ids.as_deref(),
             virtual_store_dirs.as_deref(),
         )?;
-        self.write_single_sbom(&result, &self.serialize(&result, &authors, false))
+        self.write_single_sbom(
+            &result,
+            &self.serialize(&result, &authors, false, state.config.embedder),
+        )
     }
 
     fn author_list(&self) -> Vec<String> {
@@ -1213,7 +1216,13 @@ impl SbomArgs {
         Ok(())
     }
 
-    fn serialize(&self, result: &SbomResult, authors: &[String], compact: bool) -> String {
+    fn serialize(
+        &self,
+        result: &SbomResult,
+        authors: &[String],
+        compact: bool,
+        embedder: Embedder,
+    ) -> String {
         match self.format {
             SbomFormat::CycloneDx => serialize_cyclonedx(&CycloneDxOpts {
                 result,
@@ -1222,6 +1231,7 @@ impl SbomArgs {
                 authors,
                 supplier: self.supplier.as_deref(),
                 compact,
+                embedder,
             }),
             SbomFormat::Spdx => serialize_spdx(result, compact),
         }
@@ -1265,7 +1275,7 @@ impl SbomArgs {
             if result.root_name == "unknown" {
                 continue;
             }
-            let output = self.serialize(&result, authors, compact);
+            let output = self.serialize(&result, authors, compact, state.config.embedder);
             let Some(out_template) = self.out.as_deref() else {
                 ndjson_lines.push(output);
                 continue;
@@ -1363,6 +1373,9 @@ struct CycloneDxOpts<'a> {
     authors: &'a [String],
     supplier: Option<&'a str>,
     compact: bool,
+    /// Names the generating tool in `metadata.tools`, so an embedder's SBOM
+    /// credits the program the user ran.
+    embedder: Embedder,
 }
 
 fn split_scoped_name(name: &str) -> (Option<&str>, &str) {
@@ -1423,8 +1436,8 @@ fn cyclonedx_metadata(
         "lifecycles": [{ "phase": phase }],
         "tools": { "components": [{
             "type": "application",
-            "name": "pnpm",
-            "version": pnpm_config::PNPM_VERSION,
+            "name": opts.embedder.program_name,
+            "version": opts.embedder.program_version,
         }] },
         "component": root_component,
     });

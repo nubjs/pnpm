@@ -2,10 +2,11 @@ use pnpm_lockfile::{PackageMetadata, RegistryResolution, StringOrList};
 use pnpm_package_is_installable::InstallabilityOptions;
 
 use super::{
-    LockfileResolution, base64_to_hex, build_purl, classify_license, confined_importer_dir,
-    encode_purl_name, extract_author, extract_repository, integrity_string, is_simple_spdx_id,
-    normalize_link_path, peer_names_from_manifest, platform_incompatible_optional,
-    sanitize_spdx_id, split_scoped_name, strip_url_credentials,
+    CycloneDxOpts, Embedder, LockfileResolution, SbomComponentType, SbomResult, base64_to_hex,
+    build_purl, classify_license, confined_importer_dir, encode_purl_name, extract_author,
+    extract_repository, integrity_string, is_simple_spdx_id, normalize_link_path,
+    peer_names_from_manifest, platform_incompatible_optional, sanitize_spdx_id,
+    serialize_cyclonedx, split_scoped_name, strip_url_credentials,
 };
 
 fn registry_package(
@@ -327,4 +328,52 @@ fn integrity_string_publishes_only_verified_hashes() {
         path: None,
     });
     assert_eq!(integrity_string(&git), None);
+}
+
+fn bare_result() -> SbomResult {
+    SbomResult {
+        root_name: "fixture".to_string(),
+        root_version: "1.0.0".to_string(),
+        root_type: SbomComponentType::Application,
+        root_license: None,
+        root_description: None,
+        root_author: None,
+        root_repository: None,
+        root_bugs_url: None,
+        components: Vec::new(),
+        relationships: Vec::new(),
+    }
+}
+
+fn tools_of(embedder: Embedder) -> serde_json::Value {
+    let result = bare_result();
+    let document = serialize_cyclonedx(&CycloneDxOpts {
+        result: &result,
+        spec_version: None,
+        lockfile_only: false,
+        authors: &[],
+        supplier: None,
+        compact: true,
+        embedder,
+    });
+    let parsed: serde_json::Value = serde_json::from_str(&document).expect("parse SBOM");
+    parsed["metadata"]["tools"].clone()
+}
+
+/// An SBOM is published, so the tool it credits is the program the user ran.
+#[test]
+fn cyclonedx_tools_credit_the_embedder() {
+    const HOST: Embedder =
+        Embedder { program_name: "nub", program_version: "0.0.0-test", ..Embedder::PNPM };
+
+    let components = tools_of(HOST);
+    let components = components["components"].as_array().expect("tools");
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0]["name"], "nub");
+    assert_eq!(components[0]["version"], "0.0.0-test");
+
+    let default = tools_of(Embedder::PNPM);
+    let default = default["components"].as_array().expect("tools");
+    assert_eq!(default[0]["name"], "pnpm");
+    assert_eq!(default[0]["version"], pnpm_config::PNPM_VERSION);
 }
