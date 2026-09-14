@@ -169,9 +169,13 @@ fn reject_over_deep_trees(trees: &serde_json::Value) -> napi::Result<()> {
 
 fn build_trees(options: &DependentsOptions) -> napi::Result<Vec<DependentsTree>> {
     let lockfile_dir = PathBuf::from(&options.dir);
-    let loaded =
-        LoadedState::load(&lockfile_dir, options.modules_dir.as_deref().map(Path::new), false)
-            .map_err(|report| report_to_napi_error(&report))?;
+    let loaded = LoadedState::load(
+        &lockfile_dir,
+        options.modules_dir.as_deref().map(Path::new),
+        false,
+        pnpm_config::Embedder::PNPM,
+    )
+    .map_err(|report| report_to_napi_error(&report))?;
     let registries = registry_routes(options);
 
     // No lockfile: nothing is installed, so nothing depends on anything.

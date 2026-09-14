@@ -143,7 +143,8 @@ impl LicensesArgs {
         check_licenses_subcommand(self.params.first().map(String::as_str))?;
 
         let lockfile_dir = config.workspace_dir.as_deref().unwrap_or(dir);
-        let lockfile = Lockfile::load_wanted_from_dir(lockfile_dir).into_diagnostic()?;
+        let lockfile = Lockfile::load_wanted(lockfile_dir, &config.embedder.lockfile_selection())
+            .into_diagnostic()?;
         let Some(lockfile) = lockfile else {
             if self.json {
                 println!("{{}}");

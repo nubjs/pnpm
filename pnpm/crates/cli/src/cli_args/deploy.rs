@@ -268,7 +268,11 @@ impl DeployArgs {
         // it, belong to the lockfile dir — which `lockfileDir` can move
         // away from the workspace this deploy selected its project from.
         let lockfile_dir = config.lockfile_dir_for(workspace_dir);
-        let lockfile = match load_deploy_lockfile(workspace_dir, lockfile_dir)? {
+        let lockfile = match load_deploy_lockfile(
+            workspace_dir,
+            lockfile_dir,
+            &config.embedder.lockfile_selection(),
+        )? {
             Ok(lockfile) => lockfile,
             Err(warning) => return Ok(SharedDeployOutcome::Fallback(warning)),
         };
@@ -288,7 +292,7 @@ impl DeployArgs {
             config,
             &dependency_groups,
         )?;
-        write_deploy_files(deploy_dir, &deploy_files)?;
+        write_deploy_files(deploy_dir, &deploy_files, config.embedder.lockfile_basename)?;
         // Boxed for the same large-future reason as the legacy path above.
         Box::pin(self.run_install_in_deploy_dir::<ReporterT>(
             config,
@@ -357,7 +361,8 @@ impl DeployArgs {
             self.install_args.no_trust_lockfile,
             config.trust_lockfile,
         );
-        let lockfile_path = config.lockfile.then(|| deploy_dir.join(Lockfile::FILE_NAME));
+        let lockfile_path =
+            config.lockfile.then(|| deploy_dir.join(config.embedder.lockfile_basename));
         let dependency_groups = self
             .install_args
             .dependency_options
@@ -450,13 +455,13 @@ fn apply_shared_deploy_config(config: &mut Config, deploy_dir: &Path, mode: Depl
 ///
 /// The deployed project is not one of the source workspace's importers —
 /// the deploy hook rewrites the copied manifest — so its resolution must
-/// not be seeded from the workspace lockfile. Plain `pnpm-lock.yaml`
-/// whatever the branch settings say, for the same reason: they describe
+/// not be seeded from the workspace lockfile. The profile's plain lockfile
+/// name whatever the branch settings say, for the same reason: they describe
 /// that workspace's resolution, and pnpm's deploy reads and writes the
 /// deployed lockfile under the plain name too.
 fn deployed_lockfile(state: &State, deploy_dir: &Path, frozen_lockfile: bool) -> LazyLockfile {
     if state.config.lockfile || frozen_lockfile {
-        LazyLockfile::deferred(deploy_dir.to_path_buf(), WantedLockfileSelection::default())
+        LazyLockfile::deferred(deploy_dir.to_path_buf(), state.config.embedder.lockfile_selection())
     } else {
         LazyLockfile::disabled()
     }
@@ -1747,7 +1752,11 @@ fn relative_path(from: &Path, to: &Path) -> String {
     relative.to_string_lossy().replace('\\', "/")
 }
 
-fn write_deploy_files(deploy_dir: &Path, deploy_files: &DeployFiles) -> miette::Result<()> {
+fn write_deploy_files(
+    deploy_dir: &Path,
+    deploy_files: &DeployFiles,
+    lockfile_name: &str,
+) -> miette::Result<()> {
     let mut manifest = serde_json::to_string_pretty(&deploy_files.manifest).into_diagnostic()?;
     manifest.push('\n');
     let lockfile = deploy_files
@@ -1755,7 +1764,7 @@ fn write_deploy_files(deploy_dir: &Path, deploy_files: &DeployFiles) -> miette::
         .to_yaml_string()
         .map_err(miette::Report::new)
         .wrap_err("serialize deployed lockfile")?;
-    write_atomic(&deploy_dir.join(Lockfile::FILE_NAME), lockfile.as_bytes())
+    write_atomic(&deploy_dir.join(lockfile_name), lockfile.as_bytes())
         .into_diagnostic()
         .wrap_err("write deployed lockfile")?;
     if let Some(workspace_manifest) = &deploy_files.workspace_manifest {
@@ -1820,6 +1829,7 @@ mod tests;
 fn load_deploy_lockfile(
     workspace_dir: &Path,
     lockfile_dir: &Path,
+    selection: &WantedLockfileSelection,
 ) -> miette::Result<Result<Lockfile, String>> {
     if !same_path(workspace_dir, lockfile_dir) && !is_ancestor_path(lockfile_dir, workspace_dir) {
         return Ok(Err(format!(
@@ -1827,7 +1837,7 @@ fn load_deploy_lockfile(
             lockfile_dir.display(),
         )));
     }
-    let Some(lockfile) = Lockfile::load_wanted_from_dir(lockfile_dir)
+    let Some(lockfile) = Lockfile::load_wanted(lockfile_dir, selection)
         .map_err(miette::Report::new)
         .wrap_err("read shared lockfile")?
     else {

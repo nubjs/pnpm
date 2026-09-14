@@ -225,7 +225,8 @@ fn write_deploy_files_replaces_lockfile_symlink() {
         },
     };
 
-    write_deploy_files(&deploy_dir, &deploy_files).expect("write deploy files");
+    write_deploy_files(&deploy_dir, &deploy_files, Lockfile::FILE_NAME)
+        .expect("write deploy files");
 
     assert_eq!(
         std::fs::read_to_string(&outside).expect("read outside target"),
@@ -237,6 +238,49 @@ fn write_deploy_files_replaces_lockfile_symlink() {
         std::fs::read_to_string(&lockfile_path).expect("read deployed lockfile"),
         "lockfileVersion: '9.0'\n",
     );
+}
+
+/// A deploy reads the workspace's lockfile and writes the deployed one under
+/// the profile's name. Under a host that renamed it, reading pnpm's name finds
+/// no shared lockfile and the deploy falls back to resolving from scratch.
+#[test]
+fn a_deploy_reads_and_writes_the_profiles_lockfile() {
+    use super::{DeployFiles, DeployWorkspaceConfig, load_deploy_lockfile, write_deploy_files};
+    use pnpm_config::Embedder;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    let deploy_dir = tmp.path().join("deploy");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    std::fs::create_dir_all(&deploy_dir).expect("create deploy dir");
+    std::fs::write(
+        workspace.join("host.lock"),
+        "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    )
+    .expect("write the workspace lockfile");
+    let host = Embedder { lockfile_basename: "host.lock", ..Embedder::PNPM };
+
+    let under_pnpm =
+        load_deploy_lockfile(&workspace, &workspace, &Embedder::PNPM.lockfile_selection())
+            .expect("load");
+    assert!(under_pnpm.is_err(), "pnpm's profile finds no pnpm-lock.yaml to deploy from");
+    let lockfile = load_deploy_lockfile(&workspace, &workspace, &host.lockfile_selection())
+        .expect("load")
+        .expect("the host's lockfile is deployed from");
+
+    let deploy_files = DeployFiles {
+        manifest: json!({ "name": "app" }),
+        lockfile,
+        workspace_manifest: None,
+        workspace_config: DeployWorkspaceConfig {
+            patched_dependencies: None,
+            allow_builds: HashMap::new(),
+        },
+    };
+    write_deploy_files(&deploy_dir, &deploy_files, host.lockfile_basename)
+        .expect("write deploy files");
+    assert!(deploy_dir.join("host.lock").is_file(), "the deployed lockfile takes the host's name");
+    assert!(!deploy_dir.join("pnpm-lock.yaml").exists());
 }
 
 #[cfg(windows)]

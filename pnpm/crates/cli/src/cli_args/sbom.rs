@@ -901,13 +901,20 @@ fn missing_importers(selected: &HashSet<String>, lockfile_ids: &[String]) -> Vec
     missing
 }
 
-fn missing_importers_error(missing: &[String], project_kind: &str) -> miette::Report {
+/// Names the profile's lockfile basename, which is what pnpm's wording names
+/// whichever branch lockfile the run read, and the program that updates it.
+fn missing_importers_error(
+    missing: &[String],
+    project_kind: &str,
+    embedder: Embedder,
+) -> miette::Report {
     let plural = if missing.len() == 1 { "" } else { "s" };
     let names = missing.join(", ");
-    let lockfile_name = pnpm_lockfile::Lockfile::FILE_NAME;
+    let lockfile_name = embedder.lockfile_basename;
+    let program = embedder.program_name;
     miette::miette!(
         code = "ERR_PNPM_SBOM_MISSING_IMPORTERS",
-        r#"{lockfile_name} has no entry for the {project_kind} workspace project{plural}: {names}. Run "pnpm install" to update it."#,
+        r#"{lockfile_name} has no entry for the {project_kind} workspace project{plural}: {names}. Run "{program} install" to update it."#,
     )
 }
 
@@ -1050,7 +1057,7 @@ fn merged_dedicated_lockfile_state(mut state: State) -> miette::Result<(State, V
         }
     }
 
-    assert_required_importers(merged.as_ref(), &required_importer_ids)?;
+    assert_required_importers(merged.as_ref(), &required_importer_ids, state.config.embedder)?;
 
     virtual_store_dirs.sort_unstable();
     virtual_store_dirs.dedup();
@@ -1092,6 +1099,7 @@ fn rekey_importers(
 fn assert_required_importers(
     merged: Option<&Lockfile>,
     required_importer_ids: &HashSet<String>,
+    embedder: Embedder,
 ) -> miette::Result<()> {
     let Some(lockfile) = merged else {
         return Ok(());
@@ -1099,7 +1107,7 @@ fn assert_required_importers(
     let importer_ids: Vec<String> = lockfile.importers.keys().cloned().collect();
     let missing = missing_importers(required_importer_ids, &importer_ids);
     if !missing.is_empty() {
-        return Err(missing_importers_error(&missing, "selected or reachable"));
+        return Err(missing_importers_error(&missing, "selected or reachable", embedder));
     }
     Ok(())
 }
@@ -1342,7 +1350,7 @@ fn select_importer_ids(
     let missing =
         if has_lockfile { missing_importers(&selected, &all_importer_ids) } else { Vec::new() };
     if !missing.is_empty() {
-        return Err(missing_importers_error(&missing, "selected"));
+        return Err(missing_importers_error(&missing, "selected", state.config.embedder));
     }
     // Intersecting rather than mapping the selection keeps the lockfile
     // order established by the caller.

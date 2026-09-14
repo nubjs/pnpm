@@ -419,6 +419,33 @@ fn embedder_legacy_lockfile_names_reach_the_loader_selection() {
     assert!(Config::default().wanted_lockfile_selection().legacy_file_names.is_empty());
 }
 
+/// A command that reads the lockfile by name — `list`, `licenses`, `peers`,
+/// `deploy` — asks the profile instead of spelling pnpm's file, and takes the
+/// host's retired names with it. pnpm's own profile asks for exactly the one
+/// file those commands always read.
+#[test]
+fn commands_reading_the_lockfile_by_name_read_the_profiles_files() {
+    assert_eq!(
+        Embedder::PNPM.lockfile_selection(),
+        pnpm_lockfile::WantedLockfileSelection::default()
+    );
+
+    let lockfile = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
+    let current = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(current.path().join("nub.lock"), lockfile).expect("write the host's lockfile");
+    let retired = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(retired.path().join("lock.yaml"), lockfile).expect("write a retired lockfile");
+
+    let finds = |dir: &tempfile::TempDir, embedder: Embedder| {
+        pnpm_lockfile::Lockfile::load_wanted(dir.path(), &embedder.lockfile_selection())
+            .expect("load the lockfile")
+            .is_some()
+    };
+    assert!(finds(&current, NUB));
+    assert!(finds(&retired, NUB));
+    assert!(!finds(&current, Embedder::PNPM), "pnpm's profile reads pnpm-lock.yaml only");
+}
+
 /// A host's own settings file is what the maturity-gate diagnostics name, and
 /// pnpm's wording is unchanged when no host overrides it.
 ///

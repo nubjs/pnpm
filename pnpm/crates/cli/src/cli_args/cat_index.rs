@@ -2,7 +2,8 @@ use clap::Args;
 use miette::{Context, IntoDiagnostic, Result};
 use pnpm_config::Config;
 use pnpm_lockfile::{
-    Lockfile, LockfileResolution, PackageMetadata, PkgName, ProjectSnapshot, ResolvedDependencySpec,
+    Lockfile, LockfileResolution, PackageMetadata, PkgName, ProjectSnapshot,
+    ResolvedDependencySpec, WantedLockfileSelection,
 };
 use pnpm_resolving_parse_wanted_dependency::parse_wanted_dependency;
 use pnpm_store_dir::{
@@ -40,8 +41,14 @@ impl CatIndexArgs {
         let config = config()?;
         let lockfile_dir = lockfile_dir(config, dir);
         let requested_bare = parsed.bare_specifier.as_deref();
-        let keys = lockfile_store_index_keys(&lockfile_dir, dir, &alias, requested_bare)
-            .wrap_err("load package key from lockfile")?;
+        let keys = lockfile_store_index_keys(
+            &lockfile_dir,
+            &config.embedder.lockfile_selection(),
+            dir,
+            &alias,
+            requested_bare,
+        )
+        .wrap_err("load package key from lockfile")?;
         let fallback_pkg_ids = fallback_pkg_ids(&alias, requested_bare);
         let store_dir = config.store_dir.root().to_path_buf();
         let frozen_store = config.frozen_store;
@@ -86,13 +93,14 @@ fn lockfile_dir(config: &Config, dir: &Path) -> PathBuf {
 
 fn lockfile_store_index_keys(
     lockfile_dir: &Path,
+    selection: &WantedLockfileSelection,
     dir: &Path,
     alias: &str,
     requested_bare: Option<&str>,
 ) -> Result<Vec<String>> {
-    let Some(lockfile) = Lockfile::load_wanted_from_dir(lockfile_dir)
+    let Some(lockfile) = Lockfile::load_wanted(lockfile_dir, selection)
         .into_diagnostic()
-        .wrap_err("load pnpm-lock.yaml")?
+        .wrap_err_with(|| format!("load {}", selection.file_name))?
     else {
         return Ok(Vec::new());
     };

@@ -97,12 +97,13 @@ impl PeersArgs {
         config: &Config,
         lockfile_dir: &std::path::Path,
     ) -> Result<Option<Lockfile>, pnpm_lockfile::LoadLockfileError> {
+        let wanted = config.embedder.lockfile_selection();
         if self.lockfile_only {
-            return Lockfile::load_wanted_from_dir(lockfile_dir);
+            return Lockfile::load_wanted(lockfile_dir, &wanted);
         }
         match Lockfile::load_current_from_virtual_store_dir(&config.virtual_store_dir)? {
             Some(lockfile) => Ok(Some(lockfile)),
-            None => Lockfile::load_wanted_from_dir(lockfile_dir),
+            None => Lockfile::load_wanted(lockfile_dir, &wanted),
         }
     }
 }
@@ -125,3 +126,6 @@ fn checked_project_dirs(
         .cloned()
         .collect())
 }
+
+#[cfg(test)]
+mod tests;

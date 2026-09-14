@@ -903,7 +903,8 @@ fn recursive_project_inputs<'a>(
         let project_lockfile = if config.shares_one_lockfile() {
             None
         } else {
-            Lockfile::load_wanted_from_dir(project_dir).into_diagnostic()?
+            Lockfile::load_wanted(project_dir, &config.embedder.lockfile_selection())
+                .into_diagnostic()?
         };
         project_inputs.push((project_dir, project, project_lockfile));
     }

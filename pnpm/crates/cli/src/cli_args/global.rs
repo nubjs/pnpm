@@ -678,7 +678,7 @@ async fn pins_for_downgrades<Reporter: self::Reporter + 'static>(
         lockfile_only: true,
     })
     .await?;
-    let resolved = resolved_direct_versions(install_dir);
+    let resolved = resolved_direct_versions(install_dir, base_config.embedder);
 
     Ok(pkg
         .dependencies
@@ -695,8 +695,11 @@ async fn pins_for_downgrades<Reporter: self::Reporter + 'static>(
 /// The version each direct dependency resolved to, read from the lockfile the
 /// resolve pass wrote. Only the plain-semver shape is reported: it is the only
 /// one a plain version spec resolves to, and the only one a pin can hold.
-fn resolved_direct_versions(install_dir: &Path) -> HashMap<String, Version> {
-    let Ok(Some(lockfile)) = Lockfile::load_from_path(&install_dir.join(Lockfile::FILE_NAME))
+fn resolved_direct_versions(
+    install_dir: &Path,
+    embedder: pnpm_config::Embedder,
+) -> HashMap<String, Version> {
+    let Ok(Some(lockfile)) = Lockfile::load_wanted(install_dir, &embedder.lockfile_selection())
     else {
         return HashMap::new();
     };

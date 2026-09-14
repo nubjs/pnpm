@@ -284,6 +284,7 @@ impl ListArgs {
             lockfile_dir,
             Some(config.modules_dir.as_path()),
             self.lockfile_only,
+            config.embedder,
         )?;
         let env = state.env(
             lockfile_dir,

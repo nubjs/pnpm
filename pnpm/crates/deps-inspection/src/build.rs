@@ -38,10 +38,14 @@ pub struct LoadedState {
 }
 
 impl LoadedState {
+    /// `embedder` names the two files read here as the install that wrote
+    /// them named them: the wanted lockfile, and the virtual store directory
+    /// the current lockfile sits in.
     pub fn load(
         lockfile_dir: &Path,
         modules_dir_opt: Option<&Path>,
         check_wanted_lockfile_only: bool,
+        embedder: pnpm_config::Embedder,
     ) -> miette::Result<LoadedState> {
         let modules_dir_raw = match modules_dir_opt {
             Some(dir) if dir.is_absolute() => dir.to_path_buf(),
@@ -53,11 +57,12 @@ impl LoadedState {
         let modules = read_modules_manifest::<Host>(&modules_dir)
             .into_diagnostic()
             .wrap_err("read the modules manifest")?;
-        let current_lockfile =
-            Lockfile::load_current_from_virtual_store_dir(&modules_dir.join(".pnpm"))
-                .into_diagnostic()
-                .wrap_err("load the current lockfile")?;
-        let wanted_lockfile = Lockfile::load_wanted_from_dir(lockfile_dir)
+        let current_lockfile = Lockfile::load_current_from_virtual_store_dir(
+            &modules_dir.join(embedder.virtual_store_dirname),
+        )
+        .into_diagnostic()
+        .wrap_err("load the current lockfile")?;
+        let wanted_lockfile = Lockfile::load_wanted(lockfile_dir, &embedder.lockfile_selection())
             .into_diagnostic()
             .wrap_err("load the wanted lockfile")?;
         Ok(LoadedState {
@@ -473,3 +478,6 @@ pub fn read_project_manifest(project_dir: &Path) -> ProjectManifestSummary {
         private: manifest.get("private").and_then(serde_json::Value::as_bool).unwrap_or(false),
     }
 }
+
+#[cfg(test)]
+mod tests;

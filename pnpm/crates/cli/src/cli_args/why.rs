@@ -94,8 +94,12 @@ impl WhyArgs {
         let lockfile_dir = state.lockfile_dir().to_path_buf();
         let project_dirs = state_project_dirs(&state, &lockfile_dir)?;
 
-        let loaded =
-            LoadedState::load(&lockfile_dir, Some(state.config.modules_dir.as_path()), false)?;
+        let loaded = LoadedState::load(
+            &lockfile_dir,
+            Some(state.config.modules_dir.as_path()),
+            false,
+            state.config.embedder,
+        )?;
         let Some(env) = loaded.env(
             &lockfile_dir,
             state.config.virtual_store_dir_max_length as usize,

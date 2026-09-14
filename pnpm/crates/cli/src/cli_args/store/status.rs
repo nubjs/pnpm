@@ -42,7 +42,10 @@ pub(super) async fn run<Reporter: self::Reporter>(
     dir: &Path,
 ) -> miette::Result<()> {
     let lockfile_dir = config.lockfile_dir_for(dir).to_path_buf();
-    let Some(lockfile) = Lockfile::load_wanted_from_dir(&lockfile_dir).into_diagnostic()? else {
+    let Some(lockfile) =
+        Lockfile::load_wanted(&lockfile_dir, &config.embedder.lockfile_selection())
+            .into_diagnostic()?
+    else {
         return report_untouched::<Reporter>(dir);
     };
     let modules_manifest =

@@ -322,6 +322,25 @@ impl Embedder {
         materialize_policy: None,
         dlx_exits_like_child: true,
     };
+
+    /// The wanted lockfile a command reads by name: [`Self::lockfile_basename`],
+    /// then [`Self::lockfile_legacy_basenames`].
+    ///
+    /// For the commands that inspect a project's resolution rather than
+    /// install it — `list`, `why`, `licenses`, `peers`, `deploy` and the rest.
+    /// pnpm reads `pnpm-lock.yaml` for those whatever the per-branch lockfile
+    /// settings say, so the settings stay out of this selection; an install
+    /// reads [`Config::wanted_lockfile_selection`](crate::Config::wanted_lockfile_selection).
+    /// Under pnpm's own profile this is exactly the one file those commands
+    /// always read.
+    #[must_use]
+    pub fn lockfile_selection(&self) -> pnpm_lockfile::WantedLockfileSelection {
+        pnpm_lockfile::WantedLockfileSelection {
+            file_name: self.lockfile_basename.to_owned(),
+            merge_git_branch_lockfiles: false,
+            legacy_file_names: self.lockfile_legacy_basenames,
+        }
+    }
 }
 
 impl Default for Embedder {

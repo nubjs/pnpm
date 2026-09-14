@@ -4,9 +4,9 @@ use pnpm_package_is_installable::InstallabilityOptions;
 use super::{
     CycloneDxOpts, Embedder, LockfileResolution, SbomComponentType, SbomResult, base64_to_hex,
     build_purl, classify_license, confined_importer_dir, encode_purl_name, extract_author,
-    extract_repository, integrity_string, is_simple_spdx_id, normalize_link_path,
-    peer_names_from_manifest, platform_incompatible_optional, sanitize_spdx_id,
-    serialize_cyclonedx, split_scoped_name, strip_url_credentials,
+    extract_repository, integrity_string, is_simple_spdx_id, missing_importers_error,
+    normalize_link_path, peer_names_from_manifest, platform_incompatible_optional,
+    sanitize_spdx_id, serialize_cyclonedx, split_scoped_name, strip_url_credentials,
 };
 
 fn registry_package(
@@ -376,4 +376,21 @@ fn cyclonedx_tools_credit_the_embedder() {
     let default = default["components"].as_array().expect("tools");
     assert_eq!(default[0]["name"], "pnpm");
     assert_eq!(default[0]["version"], pnpm_config::PNPM_VERSION);
+}
+
+/// The stale-lockfile error names the lockfile the running program keeps and
+/// the program that updates it. pnpm's wording is its own profile's.
+#[test]
+fn missing_importers_error_names_the_profiles_lockfile_and_program() {
+    let render = |embedder: Embedder| {
+        missing_importers_error(&["packages/c".to_string()], "selected", embedder).to_string()
+    };
+    assert_eq!(
+        render(Embedder::PNPM),
+        r#"pnpm-lock.yaml has no entry for the selected workspace project: packages/c. Run "pnpm install" to update it."#,
+    );
+    assert_eq!(
+        render(Embedder { program_name: "host", lockfile_basename: "host.lock", ..Embedder::PNPM }),
+        r#"host.lock has no entry for the selected workspace project: packages/c. Run "host install" to update it."#,
+    );
 }
