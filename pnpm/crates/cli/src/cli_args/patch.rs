@@ -178,7 +178,7 @@ impl PatchArgs {
             apply_existing_patch_file(state.config, &target, &edit_dir)?;
         }
 
-        print_success(&edit_dir);
+        print_success(state.config.embedder.program_name, &edit_dir);
         Ok(())
     }
 }
@@ -536,13 +536,13 @@ fn realpath_if_exists(path: &Path) -> Option<PathBuf> {
     dunce::canonicalize(path).ok()
 }
 
-fn print_success(edit_dir: &Path) {
-    print!("{}", render_success(edit_dir, io::stdout().is_terminal()));
+fn print_success(program_name: &str, edit_dir: &Path) {
+    print!("{}", render_success(program_name, edit_dir, io::stdout().is_terminal()));
 }
 
-fn render_success(edit_dir: &Path, colors_enabled: bool) -> String {
+fn render_success(program_name: &str, edit_dir: &Path, colors_enabled: bool) -> String {
     let edit_dir = edit_dir.display().to_string();
-    let command = format!("pnpm patch-commit {}", shell_quote(&edit_dir));
+    let command = format!("{program_name} patch-commit {}", shell_quote(&edit_dir));
     let edit_dir = if colors_enabled { edit_dir.blue().to_string() } else { edit_dir };
     let command = if colors_enabled { command.green().to_string() } else { command };
     render_success_parts(&edit_dir, &command)

@@ -91,7 +91,7 @@ fn dialoguer_prompt_reports_cancellation_when_stdin_is_not_interactive() {
 #[test]
 fn success_message_colors_edit_dir_and_commit_command_when_enabled() {
     let edit_dir = Path::new("/tmp/edit-dir");
-    let rendered = render_success(edit_dir, true);
+    let rendered = render_success("pnpm", edit_dir, true);
     let quote = if cfg!(windows) { r#"""# } else { "'" };
 
     assert!(rendered.contains("\u{1b}[34m/tmp/edit-dir\u{1b}[39m"), "{rendered:?}");
@@ -106,7 +106,7 @@ fn success_message_colors_edit_dir_and_commit_command_when_enabled() {
 #[test]
 fn success_message_is_plain_when_colors_are_disabled() {
     let edit_dir = Path::new("/tmp/edit-dir");
-    let rendered = render_success(edit_dir, false);
+    let rendered = render_success("pnpm", edit_dir, false);
     let quote = if cfg!(windows) { r#"""# } else { "'" };
 
     assert_eq!(
@@ -117,11 +117,21 @@ fn success_message_is_plain_when_colors_are_disabled() {
     );
 }
 
+/// The hint is the command the user runs next, so it names the program they
+/// are running rather than pnpm's own binary.
+#[test]
+fn success_message_names_the_running_program() {
+    let rendered = render_success("host", Path::new("/tmp/edit-dir"), false);
+
+    assert!(rendered.contains("host patch-commit "), "{rendered}");
+    assert!(!rendered.contains("pnpm"), "{rendered}");
+}
+
 #[cfg(unix)]
 #[test]
 fn success_message_shell_quotes_single_quotes_in_edit_dir() {
     let edit_dir = Path::new("/tmp/patch user's dir");
-    let rendered = render_success(edit_dir, false);
+    let rendered = render_success("pnpm", edit_dir, false);
 
     assert!(rendered.contains(r"pnpm patch-commit '/tmp/patch user'\''s dir'"), "{rendered}");
 }

@@ -43,18 +43,25 @@ pub(crate) enum PatchCommitError {
     InvalidPatchDir { patch_dir: PathBuf },
 
     /// A patch only applies because `patchedDependencies` names it, so under a
-    /// host whose settings come from its own configuration there is nowhere to
-    /// record it that the next install would read back.
+    /// host whose settings come from its own configuration and that supplies
+    /// no writer for them there is nowhere to record it that the next install
+    /// would read back. Raised before the package is fetched, so no patch
+    /// file exists for the help to point at.
     #[display(
         "The patch cannot be recorded for you, because {settings_file} is not this program's to write."
     )]
     #[diagnostic(
         code(ERR_PNPM_PATCHED_DEPENDENCIES_NOT_WRITABLE),
-        help(
-            "Add this to patchedDependencies in {settings_file} by hand, then install:\n  {entry}"
-        )
+        help("Nothing was written. The edited package is still in {patch_dir}")
     )]
-    PatchedDependenciesNotWritable { settings_file: &'static str, entry: String },
+    PatchedDependenciesNotWritable { settings_file: &'static str, patch_dir: String },
+
+    #[display("Failed to record the patch in patchedDependencies: {source}")]
+    #[diagnostic(code(ERR_PNPM_PATCH_COMMIT_RECORD_PATCHED_DEPENDENCIES))]
+    RecordPatchedDependencies {
+        #[error(source)]
+        source: io::Error,
+    },
 
     #[display("Missing package manifest field `{field}` in {}", path.display())]
     #[diagnostic(code(ERR_PNPM_PATCH_COMMIT_MISSING_MANIFEST_FIELD))]
@@ -138,6 +145,15 @@ impl PatchCommitArgs {
         state: State,
     ) -> Result<bool, PatchCommitError> {
         let patch_dir = resolve_path(dir, &self.patch_dir);
+        // Before the package is fetched or anything is written. A patch file
+        // no `patchedDependencies` entry declares is inert, so a host with
+        // nowhere to record the entry is left exactly as it was.
+        if !patched_dependencies_recordable(&state.config.embedder) {
+            return Err(PatchCommitError::PatchedDependenciesNotWritable {
+                settings_file: state.config.embedder.settings_file_display_name,
+                patch_dir: patch_dir.display().to_string(),
+            });
+        }
         let (name, version) = patched_identity(&patch_dir)?;
         let state_value = read_edit_dir_state(&state.config.modules_dir, &patch_dir)
             .map_err(PatchCommitError::StateFile)?
@@ -161,8 +177,9 @@ impl PatchCommitArgs {
         Ok(true)
     }
 
-    /// Write the patch under the patches directory and record it in the
-    /// workspace's `patchedDependencies`.
+    /// Write the patch under the patches directory and record it in
+    /// `patchedDependencies`: through the host's writer when it supplies one,
+    /// in the workspace manifest otherwise.
     fn record_patch(
         &self,
         state: &State,
@@ -182,17 +199,6 @@ impl PatchCommitArgs {
         let patch_key = if apply_to_all { name.to_string() } else { format!("{name}@{version}") };
         let patch_file_name = format!("{}.patch", patch_key.replace('/', "__"));
 
-        // Before anything is created on disk. A patch file the settings file
-        // never declares is inert — the next install would not apply it — so
-        // writing one and then failing to record it would leave the project
-        // looking patched when it is not.
-        if !state.config.embedder.writes_settings_file {
-            return Err(PatchCommitError::PatchedDependenciesNotWritable {
-                settings_file: state.config.embedder.settings_file_display_name,
-                entry: format!("{patch_key}: {patches_dir_name}/{patch_file_name}"),
-            });
-        }
-
         let patches_dir = workspace_dir.join(path_from_forward_slash(&patches_dir_name));
         fs::create_dir_all(&patches_dir).map_err(|source| PatchCommitError::CreatePatchesDir {
             path: patches_dir.clone(),
@@ -204,15 +210,26 @@ impl PatchCommitArgs {
             |source| PatchCommitError::WritePatch { path: patch_file_path.clone(), source },
         )?;
 
+        let patch_file = format!("{patches_dir_name}/{patch_file_name}");
+        if let Some(write) = state.config.embedder.patched_dependencies_writer {
+            return write(&workspace_dir, &[(patch_key.as_str(), Some(patch_file.as_str()))])
+                .map_err(|source| PatchCommitError::RecordPatchedDependencies { source });
+        }
         let mut patched_dependencies =
             state.config.patched_dependencies.clone().unwrap_or_default();
-        patched_dependencies.insert(patch_key, format!("{patches_dir_name}/{patch_file_name}"));
+        patched_dependencies.insert(patch_key, patch_file);
         pnpm_workspace_manifest_writer::set_patched_dependencies(
             &workspace_dir,
             &patched_dependencies,
         )
         .map_err(PatchCommitError::UpdateWorkspaceManifest)
     }
+}
+
+/// Whether a patch can be recorded where the next install reads it back:
+/// through the host's own writer, or in pnpm's workspace manifest.
+pub(crate) fn patched_dependencies_recordable(embedder: &pnpm_config::Embedder) -> bool {
+    embedder.patched_dependencies_writer.is_some() || embedder.writes_settings_file
 }
 
 /// The patched package's name and version, from the manifest `pnpm patch`

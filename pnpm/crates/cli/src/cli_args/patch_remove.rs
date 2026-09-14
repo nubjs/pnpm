@@ -1,3 +1,4 @@
+use super::patch_commit::patched_dependencies_recordable;
 use crate::State;
 use clap::Args;
 use derive_more::{Display, Error};
@@ -31,7 +32,8 @@ pub enum PatchRemoveError {
     Canceled,
 
     /// Dropping the `patchedDependencies` entry is the whole of
-    /// `patch-remove`, so a host that records those itself has to do it.
+    /// `patch-remove`, so a host whose settings come from its own
+    /// configuration has to supply a writer that does it.
     #[display(
         "The patch cannot be removed for you, because {settings_file} is not this program's to write."
     )]
@@ -42,6 +44,13 @@ pub enum PatchRemoveError {
         )
     )]
     PatchedDependenciesNotWritable { settings_file: &'static str, entries: String },
+
+    #[display("Failed to remove the patch from patchedDependencies: {source}")]
+    #[diagnostic(code(ERR_PNPM_PATCH_REMOVE_RECORD_PATCHED_DEPENDENCIES))]
+    RecordPatchedDependencies {
+        #[error(source)]
+        source: io::Error,
+    },
 
     #[display("Patch \"{patch}\" not found in patched dependencies")]
     #[diagnostic(code(ERR_PNPM_PATCH_NOT_FOUND))]
@@ -102,7 +111,7 @@ impl PatchRemoveArgs {
         // Before the patch files are unlinked. Deleting them and then failing
         // to drop the declaration would leave `patchedDependencies` naming
         // files that no longer exist, which fails every later install.
-        if !state.config.embedder.writes_settings_file {
+        if !patched_dependencies_recordable(&state.config.embedder) {
             return Err(PatchRemoveError::PatchedDependenciesNotWritable {
                 settings_file: state.config.embedder.settings_file_display_name,
                 entries: patches_to_remove.join("\n  "),
@@ -136,6 +145,13 @@ impl PatchRemoveArgs {
         }
         remove_empty_patch_dirs(&targets)?;
 
+        if let Some(write) = state.config.embedder.patched_dependencies_writer {
+            let removed: Vec<(&str, Option<&str>)> =
+                targets.iter().map(|target| (target.patch.as_str(), None)).collect();
+            write(&lockfile_dir, &removed)
+                .map_err(|source| PatchRemoveError::RecordPatchedDependencies { source })?;
+            return Ok(true);
+        }
         pnpm_workspace_manifest_writer::set_patched_dependencies(
             &lockfile_dir,
             &patched_dependencies,

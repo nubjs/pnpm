@@ -201,6 +201,26 @@ pub struct Embedder {
     /// `overrides`, say — want this rather than the refusal.
     pub overrides_writer: Option<OverridesWriter>,
 
+    /// Where `patchedDependencies` lives for this host, the problem
+    /// [`Self::overrides_writer`] solves for `link`. A patch applies only
+    /// because `patchedDependencies` names its file, and pnpm keeps that map
+    /// in its workspace manifest. A host that reads no such file has nowhere
+    /// the next install would find the entry, so `patch-commit` and
+    /// `patch-remove` refuse before touching the project rather than leave a
+    /// patch file nothing applies, or an entry naming a file that is gone.
+    ///
+    /// Supplying one gives the host that place. It is handed the directory
+    /// the entries belong to and each selector with the patch file to record,
+    /// relative to that directory, or `None` to drop the selector, and merges
+    /// them into whatever it already had. The engine still writes and deletes
+    /// the patch files themselves exactly as pnpm does, and leaves the
+    /// workspace manifest alone.
+    ///
+    /// Both commands install straight afterwards on a configuration built
+    /// anew, so [`Self::workspace_settings`] has to answer with the edit by
+    /// the time the writer returns.
+    pub patched_dependencies_writer: Option<PatchedDependenciesWriter>,
+
     /// An observer notified of every package this run extracts into the
     /// store, for a host that inspects package contents — pnpm registers
     /// none. Supplied as a function rather than as the observer itself so
@@ -235,6 +255,12 @@ pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::R
 /// workspace manifest. See [`Embedder::overrides_writer`].
 pub type OverridesWriter = fn(&std::path::Path, &[(&str, &str)]) -> std::io::Result<()>;
 
+/// Records an edit to `patchedDependencies` for a host that keeps them
+/// outside pnpm's workspace manifest: each selector with the patch file to
+/// record, or `None` to drop it. See [`Embedder::patched_dependencies_writer`].
+pub type PatchedDependenciesWriter =
+    fn(&std::path::Path, &[(&str, Option<&str>)]) -> std::io::Result<()>;
+
 /// Supplies the observer a host wants notified of each extraction. See
 /// [`Embedder::extract_observer`].
 pub type ExtractObserverProvider = fn() -> std::sync::Arc<dyn pnpm_store_dir::ExtractObserver>;
@@ -267,6 +293,7 @@ impl Embedder {
         compat_package_extensions: None,
         allow_builds_writer: None,
         overrides_writer: None,
+        patched_dependencies_writer: None,
         extract_observer: None,
         materialize_policy: None,
         dlx_exits_like_child: true,

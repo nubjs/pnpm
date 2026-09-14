@@ -186,6 +186,67 @@ async fn run_keeps_patch_file_still_used_by_remaining_entries() {
     assert_eq!(std::fs::read_to_string(&patch_file).expect("shared patch file"), "shared patch");
 }
 
+/// A host that supplies a writer drops the entry through it. The patch file
+/// and its emptied directory are removed exactly as pnpm removes them, the
+/// host is handed the selector with nothing to record, and no workspace
+/// manifest appears.
+#[tokio::test]
+async fn a_host_writer_drops_the_patch_instead_of_the_workspace_manifest() {
+    fn record_in_host_file(dir: &Path, entries: &[(&str, Option<&str>)]) -> std::io::Result<()> {
+        let lines: Vec<String> = entries
+            .iter()
+            .map(|(selector, patch_file)| format!("{selector}={}", patch_file.unwrap_or("-")))
+            .collect();
+        std::fs::write(dir.join("host-patched-dependencies"), lines.join("\n"))
+    }
+
+    let tmp = tempfile::tempdir().expect("temp dir");
+    std::fs::write(tmp.path().join("package.json"), "{}").expect("write package.json");
+    let patch_file = tmp.path().join("patches/ms@2.1.3.patch");
+    std::fs::create_dir_all(patch_file.parent().expect("patch parent"))
+        .expect("create patches dir");
+    std::fs::write(&patch_file, "patch body").expect("write patch");
+
+    let mut config = pnpm_config::Config::new();
+    config.embedder = pnpm_config::Embedder {
+        writes_settings_file: false,
+        patched_dependencies_writer: Some(record_in_host_file),
+        ..pnpm_config::Embedder::PNPM
+    };
+    config.workspace_dir = Some(tmp.path().to_path_buf());
+    config.patched_dependencies =
+        Some(IndexMap::from([("ms@2.1.3".to_string(), "patches/ms@2.1.3.patch".to_string())]));
+    let config: &'static pnpm_config::Config = Box::leak(Box::new(config));
+    let state = State {
+        tarball_mem_cache: std::sync::Arc::new(pnpm_tarball::MemCache::default()),
+        http_client: std::sync::Arc::new(pnpm_network::ThrottledClient::default()),
+        config,
+        manifest: pnpm_package_manifest::PackageManifest::from_path(
+            tmp.path().join("package.json"),
+        )
+        .expect("package manifest"),
+        lockfile: pnpm_lockfile::LazyLockfile::disabled(),
+        resolved_packages: pnpm_package_manager::ResolvedPackages::new(),
+    };
+
+    PatchRemoveArgs { patches: vec!["ms@2.1.3".to_string()] }
+        .run(tmp.path(), state)
+        .await
+        .expect("the host writer drops the patch");
+
+    assert!(!patch_file.exists(), "the patch file is removed");
+    assert!(!tmp.path().join("patches").exists(), "the emptied patches directory goes too");
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("host-patched-dependencies"))
+            .expect("the host's own file"),
+        "ms@2.1.3=-"
+    );
+    assert!(
+        !tmp.path().join("pnpm-workspace.yaml").exists(),
+        "nothing reached the workspace manifest this host never reads"
+    );
+}
+
 #[test]
 fn patch_removal_target_rejects_patch_file_outside_patches_dir() {
     let tmp = tempfile::tempdir().expect("temp dir");

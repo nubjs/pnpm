@@ -1,13 +1,20 @@
 use super::{
-    cleanup_after_diff, normalize_patches_dir_name, patch_target_from_state,
-    path_from_forward_slash, remove_dir_if_exists, write_patch_file_atomically,
+    PatchCommitArgs, PatchCommitError, cleanup_after_diff, normalize_patches_dir_name,
+    patch_target_from_state, path_from_forward_slash, remove_dir_if_exists,
+    write_patch_file_atomically,
 };
-use crate::cli_args::patch_state::EditDirState;
+use crate::{State, cli_args::patch_state::EditDirState};
+use pnpm_config::Embedder;
 use pnpm_lockfile::{ComVer, Lockfile, LockfileVersion, PackageKey, PackageMetadata};
 use pnpm_package_manager::PkgFilesForDiff;
+use pnpm_reporter::SilentReporter;
 use pretty_assertions::assert_eq;
 use serde_json::json;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 use tempfile::tempdir;
 
 fn empty_lockfile() -> Lockfile {
@@ -207,5 +214,103 @@ fn path_from_forward_slash_builds_platform_path() {
     assert_eq!(
         path_from_forward_slash("patches/@scope__pkg.patch"),
         PathBuf::from("patches").join("@scope__pkg.patch"),
+    );
+}
+
+/// The profile of a host that resolves its own configuration: it names its
+/// own settings file and has the engine write none.
+fn host_that_writes_no_settings_file() -> Embedder {
+    Embedder {
+        writes_settings_file: false,
+        settings_file_display_name: "host.jsonc",
+        ..Embedder::PNPM
+    }
+}
+
+/// Records each edit in a file of the host's own, one `selector=patch` line
+/// per entry, `-` standing for a dropped one.
+fn record_in_host_file(dir: &Path, entries: &[(&str, Option<&str>)]) -> std::io::Result<()> {
+    let lines: Vec<String> = entries
+        .iter()
+        .map(|(selector, patch_file)| format!("{selector}={}", patch_file.unwrap_or("-")))
+        .collect();
+    fs::write(dir.join("host-patched-dependencies"), lines.join("\n"))
+}
+
+fn state_in(dir: &Path, embedder: Embedder) -> State {
+    fs::write(dir.join("package.json"), "{}").expect("write package.json");
+    let mut config = pnpm_config::Config::new();
+    config.embedder = embedder;
+    config.workspace_dir = Some(dir.to_path_buf());
+    let config: &'static pnpm_config::Config = Box::leak(Box::new(config));
+    State {
+        tarball_mem_cache: std::sync::Arc::new(pnpm_tarball::MemCache::default()),
+        http_client: std::sync::Arc::new(pnpm_network::ThrottledClient::default()),
+        config,
+        manifest: pnpm_package_manifest::PackageManifest::from_path(dir.join("package.json"))
+            .expect("package manifest"),
+        lockfile: pnpm_lockfile::LazyLockfile::disabled(),
+        resolved_packages: pnpm_package_manager::ResolvedPackages::new(),
+    }
+}
+
+/// With nowhere to record `patchedDependencies`, the command stops before it
+/// reads the edited package, fetches the original or writes anything: this
+/// edit directory was never made by `patch`, and the refusal still comes
+/// first. The help points at the edits the user still has, never at a patch
+/// file that was not written.
+#[tokio::test]
+async fn a_host_with_nowhere_to_record_the_patch_is_refused_before_anything_happens() {
+    let tmp = tempdir().expect("temp dir");
+    let edit_dir = tmp.path().join("edit-dir");
+    let state = state_in(tmp.path(), host_that_writes_no_settings_file());
+
+    let err = PatchCommitArgs { patch_dir: edit_dir.clone(), patches_dir: None }
+        .run::<SilentReporter>(tmp.path(), state)
+        .await
+        .expect_err("a host with nowhere to record the patch is refused");
+
+    assert!(
+        matches!(
+            &err,
+            PatchCommitError::PatchedDependenciesNotWritable { settings_file: "host.jsonc", .. }
+        ),
+        "{err:?}"
+    );
+    let help = miette::Diagnostic::help(&err).map(|help| help.to_string()).unwrap_or_default();
+    assert!(help.contains(&edit_dir.display().to_string()), "{help}");
+    assert!(!help.contains(".patch"), "the help names no patch file: {help}");
+    assert!(!tmp.path().join("patches").exists());
+}
+
+/// A host that supplies a writer gets the patch recorded through it: the patch
+/// file lands where pnpm writes it, the host is handed the entry relative to
+/// the directory it belongs to, and no workspace manifest appears.
+#[test]
+fn a_host_writer_records_the_patch_instead_of_the_workspace_manifest() {
+    let tmp = tempdir().expect("temp dir");
+    let embedder = Embedder {
+        patched_dependencies_writer: Some(record_in_host_file),
+        ..host_that_writes_no_settings_file()
+    };
+    let state = state_in(tmp.path(), embedder);
+
+    PatchCommitArgs { patch_dir: tmp.path().join("edit-dir"), patches_dir: None }
+        .record_patch(&state, tmp.path(), "ms", "2.1.3", false, "patch body\n")
+        .expect("the host writer records the patch");
+
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("patches").join("ms@2.1.3.patch"))
+            .expect("the patch file"),
+        "patch body\n"
+    );
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("host-patched-dependencies"))
+            .expect("the host's own file"),
+        "ms@2.1.3=patches/ms@2.1.3.patch"
+    );
+    assert!(
+        !tmp.path().join("pnpm-workspace.yaml").exists(),
+        "nothing reached the workspace manifest this host never reads"
     );
 }
