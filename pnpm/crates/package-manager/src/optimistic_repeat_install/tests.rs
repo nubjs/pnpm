@@ -1232,6 +1232,82 @@ fn returns_skipped_when_inject_workspace_packages_drifts() {
     assert!(matches!(decision, Decision::Skipped { reason } if reason.contains("settings")));
 }
 
+/// A materialize policy that keeps nothing and reports `self.0` as its
+/// fingerprint.
+#[derive(Debug)]
+struct Fingerprinted(&'static str);
+
+impl pnpm_store_dir::MaterializePolicy for Fingerprinted {
+    fn materialize_locally(
+        &self,
+        _resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> std::collections::HashSet<String> {
+        std::collections::HashSet::new()
+    }
+
+    fn fingerprint(&self) -> Option<String> {
+        Some(self.0.to_owned())
+    }
+}
+
+/// Drift in the host's materialize-policy fingerprint invalidates the
+/// cached state. The policy decides which packages leave the global
+/// virtual store, and nothing else the state records moves when only the
+/// policy's answers change, so without the key a warm tree keeps the
+/// layout the previous policy chose.
+#[test]
+fn returns_skipped_when_the_materialize_policy_fingerprint_drifts() {
+    let dir = tempdir().unwrap();
+    let workspace_root = dir.path();
+    let manifest_path = workspace_root.join("package.json");
+    fs::write(&manifest_path, r#"{"name":"root","version":"1.0.0"}"#).unwrap();
+    let manifest = PackageManifest::from_path(manifest_path).unwrap();
+
+    let mut config = Config::new();
+    config.modules_dir = workspace_root.join("node_modules");
+    fs::create_dir_all(&config.modules_dir).unwrap();
+    config.materialize_policy = Some(std::sync::Arc::new(Fingerprinted("v2")));
+    let config = config.leak();
+
+    let mut stale_config = Config::new();
+    stale_config.modules_dir = config.modules_dir.clone();
+    stale_config.materialize_policy = Some(std::sync::Arc::new(Fingerprinted("v1")));
+    let stale_settings = current_settings(
+        &stale_config,
+        pnpm_config::NodeLinker::Isolated,
+        isolated_included(),
+        None,
+    );
+    let mut projects = BTreeMap::new();
+    projects.insert(
+        workspace_root.to_string_lossy().into_owned(),
+        ProjectEntry { name: Some("root".into()), version: Some("1.0.0".into()) },
+    );
+    write_state(workspace_root, backdate_existing_files(workspace_root), stale_settings, projects);
+
+    let decision = check(
+        workspace_root,
+        config,
+        pnpm_config::NodeLinker::Isolated,
+        &[(workspace_root.to_path_buf(), &manifest)],
+    );
+    assert!(matches!(decision, Decision::Skipped { reason } if reason.contains("settings")));
+}
+
+/// pnpm sets no materialize policy, so the state it records carries no
+/// policy key and keeps the bytes pnpm itself writes.
+#[test]
+fn a_config_without_a_materialize_policy_records_no_fingerprint() {
+    let settings = current_settings(
+        &Config::new(),
+        pnpm_config::NodeLinker::Isolated,
+        isolated_included(),
+        None,
+    );
+    let recorded = serde_json::to_value(&settings).unwrap();
+    assert!(recorded.get("materializePolicy").is_none(), "recorded: {recorded}");
+}
+
 /// Drift in `enableGlobalVirtualStore` invalidates the cached state.
 /// Toggling it moves the virtual store between `<storeDir>/links` and
 /// each project's `node_modules/.pnpm`, so the previous install's

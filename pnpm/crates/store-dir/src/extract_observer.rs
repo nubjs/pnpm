@@ -108,6 +108,17 @@ pub trait MaterializePolicy: std::fmt::Debug + Send + Sync {
     /// The identifiers, among `resolved`, that must not be shared between
     /// projects. An identifier that names nothing in `resolved` is ignored.
     fn materialize_locally(&self, resolved: &[ResolvedPackage<'_>]) -> HashSet<String>;
+
+    /// A token that changes whenever this policy could answer differently
+    /// for the same packages, such as a new version of the analysis behind
+    /// it. An install records it in the workspace state, so a repeat
+    /// install under a changed policy is not taken as up to date and
+    /// rebuilds the layout instead of keeping the previous answer's.
+    ///
+    /// `None`, the default, records nothing.
+    fn fingerprint(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A materialization policy an install carries, if its host set one.

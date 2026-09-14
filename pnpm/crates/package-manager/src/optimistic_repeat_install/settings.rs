@@ -176,6 +176,11 @@ impl SettingsComparison<'_> {
             "linkWorkspacePackages",
             recorded.link_workspace_packages != live.link_workspace_packages,
         );
+        return_drift_if!(
+            self,
+            "materializePolicy",
+            recorded.materialize_policy != live.materialize_policy,
+        );
         None
     }
     fn resolution_drift(&self) -> Option<&'static str> {
@@ -339,6 +344,10 @@ pub(crate) fn current_settings(
         link_workspace_packages: Some(link_workspace_packages_to_json(
             config.link_workspace_packages,
         )),
+        materialize_policy: config
+            .materialize_policy
+            .as_ref()
+            .and_then(|policy| policy.fingerprint()),
         node_linker: Some(map_node_linker(node_linker)),
         optional: Some(included.optional_dependencies),
         overrides: config

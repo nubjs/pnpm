@@ -123,6 +123,11 @@ pub struct WorkspaceStateSettings {
     pub inject_workspace_packages: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_workspace_packages: Option<serde_json::Value>,
+    /// The fingerprint of the materialize policy an embedding host set, so a
+    /// policy that would place packages differently invalidates the
+    /// repeat-install fast path. pnpm sets no policy and never records it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub materialize_policy: Option<String>,
     /// Minutes a published version must age before it may be installed.
     /// pnpm resolves this to a concrete `24 * 60` default, so it must be
     /// recorded for pnpm's all-key freshness check to stay on the fast
