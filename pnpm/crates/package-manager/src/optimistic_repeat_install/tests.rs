@@ -5,7 +5,9 @@ use super::{
     current_pnpmfiles,
     deps_status::{RunDepsStatus, check_deps_status_before_run, install_args_from_state},
     manifest_agreement::{LinkedPackagesContext, linked_packages_are_up_to_date},
-    settings::{current_settings, current_settings_with_catalogs},
+    settings::{
+        current_settings, current_settings_with_catalogs, recorded_materialize_policy_matches,
+    },
     timestamps::{FileMtime, lockfile_modified_since, modified_at_or_after},
 };
 use indexmap::IndexMap;
@@ -1292,6 +1294,30 @@ fn returns_skipped_when_the_materialize_policy_fingerprint_drifts() {
         &[(workspace_root.to_path_buf(), &manifest)],
     );
     assert!(matches!(decision, Decision::Skipped { reason } if reason.contains("settings")));
+}
+
+/// The frozen path's up-to-date early return reads the recorded policy
+/// fingerprint: a tree the previous policy laid out is not current under a
+/// policy that answers differently, while one under the same policy is, and
+/// so is a tree with no policy and no state at all.
+#[test]
+fn the_recorded_materialize_policy_fingerprint_decides_whether_a_frozen_tree_is_current() {
+    let dir = tempdir().unwrap();
+    let workspace_root = dir.path();
+    let mut config = Config::new();
+    config.materialize_policy = Some(std::sync::Arc::new(Fingerprinted("v2")));
+    assert!(!recorded_materialize_policy_matches(workspace_root, &config), "no state recorded");
+    assert!(recorded_materialize_policy_matches(workspace_root, &Config::new()), "no policy");
+
+    let mut previous = Config::new();
+    previous.materialize_policy = Some(std::sync::Arc::new(Fingerprinted("v1")));
+    let settings =
+        current_settings(&previous, pnpm_config::NodeLinker::Isolated, isolated_included(), None);
+    write_state(workspace_root, 0, settings, BTreeMap::new());
+    assert!(!recorded_materialize_policy_matches(workspace_root, &config), "policy changed");
+
+    config.materialize_policy = Some(std::sync::Arc::new(Fingerprinted("v1")));
+    assert!(recorded_materialize_policy_matches(workspace_root, &config), "policy unchanged");
 }
 
 /// pnpm sets no materialize policy, so the state it records carries no

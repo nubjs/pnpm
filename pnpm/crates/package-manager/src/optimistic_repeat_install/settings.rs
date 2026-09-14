@@ -25,6 +25,20 @@ pub(crate) fn recorded_supported_architectures_match(
     recorded == live.and_then(|value| serde_json::to_value(value).ok())
 }
 
+/// Whether the materialize-policy fingerprint recorded by the last install
+/// matches `config`'s. Read for the frozen path's lockfile-up-to-date early
+/// return for the same reason as [`recorded_supported_architectures_match`]:
+/// a changed policy moves packages between the global virtual store and the
+/// project without touching the lockfile or `.modules.yaml`. A missing or
+/// unreadable state matches only when the policy records nothing.
+pub(crate) fn recorded_materialize_policy_matches(workspace_root: &Path, config: &Config) -> bool {
+    let recorded = match load_workspace_state(workspace_root) {
+        Ok(Some(state)) => state.settings.materialize_policy,
+        _ => None,
+    };
+    recorded == config.materialize_policy.as_ref().and_then(|policy| policy.fingerprint())
+}
+
 pub(crate) fn settings_match(
     state: &WorkspaceState,
     config: &Config,

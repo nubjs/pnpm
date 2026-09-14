@@ -512,6 +512,13 @@ fn frozen_tree_up_to_date<'a>(
             context.workspace_root,
             context.supported_architectures,
         )
+        // A host's materialize policy that now answers differently moves
+        // packages between the global virtual store and the project, which
+        // neither lockfile nor `.modules.yaml` records.
+        && crate::optimistic_repeat_install::recorded_materialize_policy_matches(
+            context.workspace_root,
+            config,
+        )
         // An `allowBuilds` change that now permits a previously-ignored
         // build must rebuild it, even though the lockfile and layout are
         // unchanged.
