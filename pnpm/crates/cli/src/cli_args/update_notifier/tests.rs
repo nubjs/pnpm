@@ -1,5 +1,7 @@
-use super::{checked_recently, read_state, to_utc_string, write_state};
+use super::{checked_recently, read_state, spawn, to_utc_string, write_state};
 use chrono::{TimeZone, Utc};
+use pnpm_config::{Config, Embedder};
+use pnpm_reporter::LogEvent;
 use serde_json::{Map, Value, json};
 use tempfile::tempdir;
 
@@ -104,4 +106,28 @@ fn the_state_directory_is_created_on_demand() {
     write_state(&state_file, Map::new(), now);
 
     assert!(checked_recently(&read_state(&state_file), now));
+}
+
+fn ignore(_: &LogEvent) {}
+
+/// A host that manages package-manager versions for its own users has no
+/// pnpm release for them to install, so the check never starts under it.
+#[tokio::test]
+async fn a_host_that_manages_versions_itself_never_checks() {
+    let dir = tempdir().unwrap();
+    let config = |manage_package_manager_versions| Config {
+        update_notifier: true,
+        ci: false,
+        offline: false,
+        prefer_offline: false,
+        state_dir: dir.path().to_path_buf(),
+        embedder: Embedder { manage_package_manager_versions, ..Embedder::PNPM },
+        ..Config::default()
+    };
+
+    let control = spawn(&config(true), ignore);
+    assert!(control.is_some(), "the check must start under pnpm's own profile");
+    control.unwrap().abort();
+
+    assert!(spawn(&config(false), ignore).is_none());
 }

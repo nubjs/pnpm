@@ -11,6 +11,11 @@
 //! unreachable registry, or an unwritable state directory leaves the
 //! command's own outcome untouched.
 //!
+//! A host that manages package-manager versions for its own users
+//! (`Embedder::manage_package_manager_versions` off) never checks: the
+//! notice names a pnpm release and `pnpm self-update`, and neither is how
+//! that host's users update.
+//!
 //! An `install` that finishes through the repeat-install fast path never
 //! reaches this module — that path deliberately returns before the async
 //! runtime and the HTTP client exist. The check runs on the next install
@@ -40,14 +45,19 @@ const LAST_UPDATE_CHECK_KEY: &str = "lastUpdateCheck";
 pub(crate) type PendingUpdateCheck = Option<JoinHandle<()>>;
 
 /// Start the daily update check in the background, or return [`None`] when
-/// the settings turn it off, the run is offline, or today's check already
-/// happened.
+/// the settings or the embedding host turn it off, the run is offline, or
+/// today's check already happened.
 ///
 /// `config` must already carry the command's CLI overrides, since
 /// `--offline` and `--prefer-offline` are among the things that call the
 /// check off.
 pub(crate) fn spawn(config: &Config, emit: fn(&LogEvent)) -> PendingUpdateCheck {
-    if !config.update_notifier || config.ci || config.offline || config.prefer_offline {
+    if !config.update_notifier
+        || !config.embedder.manage_package_manager_versions
+        || config.ci
+        || config.offline
+        || config.prefer_offline
+    {
         return None;
     }
     let state_file = config.state_dir.join(STATE_FILE_NAME);

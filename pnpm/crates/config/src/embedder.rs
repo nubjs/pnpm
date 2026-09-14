@@ -40,7 +40,8 @@ pub struct Embedder {
     /// Whether a `packageManager` / `devEngines.packageManager` pin is
     /// acted on: resolved, downloaded, and delegated to, and reported as an
     /// error when it names a different package manager. A host that owns
-    /// version management for its own users turns this off.
+    /// version management for its own users turns this off, which also
+    /// stops `install` and `add` from announcing a newer pnpm.
     pub manage_package_manager_versions: bool,
 
     /// Whether `devEngines.runtime` / `engines.runtime` entries are checked
