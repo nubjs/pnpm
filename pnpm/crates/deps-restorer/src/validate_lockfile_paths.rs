@@ -18,7 +18,8 @@ use pnpm_lockfile_verification::VerifyError;
 use std::collections::{BTreeSet, HashMap};
 
 /// Reject the install when any snapshot's computed virtual-store slot
-/// resolves outside the store root. The whole `snapshots` map is
+/// resolves outside the store directory it is placed in
+/// ([`VirtualStoreLayout::slot_store_dir`]). The whole `snapshots` map is
 /// scanned — not just the survivors of the warm-install skip filter —
 /// so a poisoned snapshot that would be skipped as unchanged is still
 /// rejected before any directory is created.
@@ -37,7 +38,7 @@ pub fn validate_virtual_store_slot_containment(
     for key in snapshots.keys() {
         // Lexical containment: the slot does not exist yet, so this must
         // not touch the filesystem.
-        if !is_subdir(layout.package_store_dir(), &layout.slot_dir(key)) {
+        if !is_subdir(layout.slot_store_dir(key), &layout.slot_dir(key)) {
             escaped.insert(key.to_string());
         }
     }

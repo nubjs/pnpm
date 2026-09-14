@@ -515,6 +515,17 @@ impl VirtualStoreLayout {
         Some(join_global_virtual_store_path(&self.package_store_dir, suffix))
     }
 
+    /// The store directory `key`'s slot is created in: the project's own
+    /// virtual store for a package the host's policy keeps out of the
+    /// shared store, [`Self::package_store_dir`] for every other package.
+    #[must_use]
+    pub fn slot_store_dir(&self, key: &PackageKey) -> &Path {
+        match &self.local_store_dir {
+            Some(local_store_dir) if self.locally_materialized.contains(key) => local_store_dir,
+            _ => &self.package_store_dir,
+        }
+    }
+
     #[must_use]
     pub fn slot_dir(&self, key: &PackageKey) -> PathBuf {
         if let Some(local_store_dir) = self.local_store_dir.as_ref()
