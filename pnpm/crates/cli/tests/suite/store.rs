@@ -212,6 +212,73 @@ fn store_status_reports_a_package_edited_after_it_was_linked_out() {
     assert!(stderr.contains("is-odd@3.0.1"), "stderr={stderr}");
 }
 
+/// A global virtual store keeps each slot under a graph-hashed path
+/// rather than the project's flat one, so a check that builds the flat
+/// path finds nothing and calls every package modified.
+#[test]
+fn store_status_reads_the_slots_of_a_global_virtual_store() {
+    let CommandTempCwd { mut pacquet, workspace, root: _root, .. } =
+        CommandTempCwd::init().add_mocked_registry();
+    enable_global_virtual_store(&workspace);
+    pacquet.arg("add").arg("is-odd@3.0.1").assert().success();
+
+    let output = Command::cargo_bin("pnpm")
+        .expect("find the pnpm binary")
+        .with_current_dir(&workspace)
+        .args(["store", "status"])
+        .output()
+        .expect("run pacquet store status");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("stderr={stderr}");
+    assert!(output.status.success(), "a clean global virtual store must report untouched");
+    assert!(stderr.contains("Packages in the store are untouched"), "stderr={stderr}");
+}
+
+/// The companion to the test above: without this one, that assertion
+/// would pass just as well on a check that resolves nothing at all.
+#[test]
+fn store_status_reports_an_edited_package_in_a_global_virtual_store() {
+    let CommandTempCwd { mut pacquet, workspace, root: _root, .. } =
+        CommandTempCwd::init().add_mocked_registry();
+    enable_global_virtual_store(&workspace);
+    pacquet.arg("add").arg("is-odd@3.0.1").assert().success();
+
+    // The slot is hashed, so reach it the way the project does.
+    let slot = fs::canonicalize(workspace.join("node_modules/is-odd"))
+        .expect("resolve the installed package through its link");
+    fs::write(slot.join("index.js"), "module.exports = 'tampered'\n")
+        .expect("edit the installed package");
+
+    let output = Command::cargo_bin("pnpm")
+        .expect("find the pnpm binary")
+        .with_current_dir(&workspace)
+        .args(["store", "status"])
+        .output()
+        .expect("run pacquet store status");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("stderr={stderr}");
+    assert!(!output.status.success(), "store status must fail once a package is modified");
+    assert!(stderr.contains("ERR_PNPM_MODIFIED_DEPENDENCY"), "stderr={stderr}");
+    assert!(stderr.contains("is-odd@3.0.1"), "stderr={stderr}");
+}
+
+/// `add_mocked_registry` already writes the key, and a second copy is a
+/// duplicate mapping key the loader refuses outright — so replace the line
+/// rather than appending one.
+fn enable_global_virtual_store(workspace: &std::path::Path) {
+    let path = workspace.join("pnpm-workspace.yaml");
+    let yaml = fs::read_to_string(&path).unwrap_or_default();
+    let mut out: Vec<String> = yaml
+        .lines()
+        .filter(|line| !line.starts_with("enableGlobalVirtualStore:"))
+        .map(ToOwned::to_owned)
+        .collect();
+    out.push("enableGlobalVirtualStore: true".to_owned());
+    let mut text = out.join("\n");
+    text.push('\n');
+    fs::write(&path, text).expect("write pnpm-workspace.yaml");
+}
+
 #[test]
 fn store_add_fetches_a_package_without_touching_the_project() {
     let CommandTempCwd { pacquet, workspace, root: _root, npmrc_info, .. } =

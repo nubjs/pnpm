@@ -50,7 +50,21 @@ pub(super) async fn run<Reporter: self::Reporter>(
     };
     let modules_manifest =
         read_modules_manifest::<Host>(&lockfile_dir.join("node_modules")).into_diagnostic()?;
-    let packages = packages_to_check(config, &lockfile, modules_manifest.as_ref(), &lockfile_dir);
+    // A global virtual store lays slots out as
+    // `<store>/links/<scope>/<name>/<version>/<hash>`, so the project-flat
+    // path this used to build named nothing and every package read as
+    // modified. `VirtualStoreLayout` is the engine's own answer to that.
+    let layout = config
+        .enable_global_virtual_store
+        .then(|| crate::cli_args::licenses::lockfile_layout(config, dir, &lockfile_dir, &lockfile))
+        .transpose()?;
+    let packages = packages_to_check(
+        config,
+        &lockfile,
+        modules_manifest.as_ref(),
+        &lockfile_dir,
+        layout.as_ref(),
+    );
 
     let store_dir = config.store_dir.root().to_path_buf();
     let frozen_store = config.frozen_store;
@@ -73,6 +87,7 @@ fn packages_to_check(
     lockfile: &Lockfile,
     modules_manifest: Option<&Modules>,
     lockfile_dir: &Path,
+    layout: Option<&pnpm_deps_restorer::VirtualStoreLayout>,
 ) -> Vec<PackageToCheck> {
     let skipped: HashSet<&str> = modules_manifest
         .map(|manifest| manifest.skipped.iter().map(String::as_str).collect())
@@ -91,8 +106,14 @@ fn packages_to_check(
         .filter_map(|(key, metadata)| {
             let store_index_key =
                 store_index_key_for_resolution(&metadata.resolution, &key.pkg_id(), true)?;
-            let modules_dir =
-                virtual_store_dir.join(key.to_virtual_store_name(max_length)).join("node_modules");
+            // Without a layout the recorded `virtual_store_dir` still wins:
+            // it is what the install actually wrote, and it survives a
+            // virtual store the project relocated.
+            let slot_dir = match layout {
+                Some(layout) => layout.slot_dir(key),
+                None => virtual_store_dir.join(key.to_virtual_store_name(max_length)),
+            };
+            let modules_dir = slot_dir.join("node_modules");
             Some(PackageToCheck {
                 dep_path: key.to_string(),
                 package_dir: safe_join_modules_dir(&modules_dir, &key.name.to_string()).ok()?,

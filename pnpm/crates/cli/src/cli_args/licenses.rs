@@ -189,7 +189,12 @@ impl LicensesArgs {
 
 /// Where each locked package's files live, checked to sit inside the
 /// virtual store.
-fn lockfile_layout(
+///
+/// Shared with `store status`, which has to resolve the same slots: a
+/// global virtual store puts them under a graph-hashed path rather than
+/// the project's flat one, and deriving that needs the build policy so a
+/// locally materialized package is not looked for in the shared store.
+pub(crate) fn lockfile_layout(
     config: &Config,
     dir: &std::path::Path,
     lockfile_dir: &std::path::Path,
