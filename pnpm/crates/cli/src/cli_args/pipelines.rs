@@ -997,7 +997,7 @@ pub(crate) fn derive_config_root(
     // pnpm warns from config-reading, so the notice lands ahead of any
     // install output. This is the install family's earliest point that
     // knows the root manifest's directory.
-    warn_ignored_pnpm_manifest_fields(root_manifest.as_ref());
+    warn_ignored_pnpm_manifest_fields(root_manifest.as_ref(), cfg.embedder);
     warn_unsupported_workspaces_field(
         cfg.embedder,
         root_manifest.as_ref(),

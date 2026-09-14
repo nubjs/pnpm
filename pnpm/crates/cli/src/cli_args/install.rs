@@ -1638,7 +1638,7 @@ fn report_up_to_date_install(
     emit: fn(&pnpm_reporter::LogEvent),
 ) {
     let root_manifest = read_root_manifest_json(config_root);
-    warn_ignored_pnpm_manifest_fields(root_manifest.as_ref());
+    warn_ignored_pnpm_manifest_fields(root_manifest.as_ref(), config.embedder);
     warn_unsupported_workspaces_field(
         config.embedder,
         root_manifest.as_ref(),

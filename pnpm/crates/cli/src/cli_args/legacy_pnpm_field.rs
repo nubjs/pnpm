@@ -4,6 +4,7 @@
 //! so the setting isn't silently dropped.
 
 use super::config_warnings::emit_config_warning;
+use pnpm_config::Embedder;
 use serde_json::Value;
 
 /// Keys pnpm reads from `pnpm-workspace.yaml` and never from the `pnpm`
@@ -36,17 +37,33 @@ const MIGRATED_PNPM_FIELD_KEYS: &[&str] = &[
 
 /// Warn about every migrated key the root project manifest still
 /// declares under `pnpm`.
-pub(crate) fn warn_ignored_pnpm_manifest_fields(manifest: Option<&Value>) {
+pub(crate) fn warn_ignored_pnpm_manifest_fields(manifest: Option<&Value>, embedder: Embedder) {
     let ignored = ignored_pnpm_field_keys(manifest);
     if ignored.is_empty() {
         return;
     }
+    emit_config_warning(&ignored_field_warning(&ignored, embedder));
+}
+
+/// The warning names the program that ignored the keys. A host that reads
+/// none of pnpm's configuration never "stopped" reading the field, and gets no
+/// pointer to pnpm's settings page: the new home it describes is
+/// `pnpm-workspace.yaml`, which that host does not read either.
+fn ignored_field_warning(ignored: &[String], embedder: Embedder) -> String {
     let keys = ignored.iter().map(|key| format!(r#""pnpm.{key}""#)).collect::<Vec<_>>().join(", ");
-    emit_config_warning(&format!(
-        "The \"pnpm\" field in package.json is no longer read by pnpm. \
-         The following keys were ignored: {keys}. \
-         See https://pnpm.io/settings for the new home of each setting.",
-    ));
+    let program = embedder.program_name;
+    if embedder.reads_pnpm_config {
+        format!(
+            "The \"pnpm\" field in package.json is no longer read by {program}. \
+             The following keys were ignored: {keys}. \
+             See https://pnpm.io/settings for the new home of each setting.",
+        )
+    } else {
+        format!(
+            "The \"pnpm\" field in package.json is not read by {program}. \
+             The following keys were ignored: {keys}.",
+        )
+    }
 }
 
 fn ignored_pnpm_field_keys(manifest: Option<&Value>) -> Vec<String> {

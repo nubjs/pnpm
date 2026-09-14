@@ -1,5 +1,6 @@
-use super::ignored_pnpm_field_keys;
+use super::{ignored_field_warning, ignored_pnpm_field_keys};
 use crate::cli_args::package_manager::read_root_manifest_json;
+use pnpm_config::Embedder;
 use std::{fs, path::Path};
 
 fn write_manifest(dir: &Path, contents: &str) {
@@ -53,4 +54,21 @@ fn tolerates_absent_malformed_and_non_object_manifests() {
 
     write_manifest(dir.path(), r#"{"pnpm":"11.0.0"}"#);
     assert!(keys_in(dir.path()).is_empty(), "non-object pnpm field");
+}
+
+/// pnpm's warning keeps its wording. A host's names the host, and leaves out
+/// the pointer to pnpm's settings page when the host reads none of pnpm's
+/// configuration — that page sends the reader to `pnpm-workspace.yaml`.
+#[test]
+fn the_warning_names_the_program_that_ignored_the_keys() {
+    let ignored = ["overrides".to_string(), "allowBuilds".to_string()];
+    assert_eq!(
+        ignored_field_warning(&ignored, Embedder::PNPM),
+        r#"The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides", "pnpm.allowBuilds". See https://pnpm.io/settings for the new home of each setting."#,
+    );
+    let host = Embedder { program_name: "host", reads_pnpm_config: false, ..Embedder::PNPM };
+    assert_eq!(
+        ignored_field_warning(&ignored, host),
+        r#"The "pnpm" field in package.json is not read by host. The following keys were ignored: "pnpm.overrides", "pnpm.allowBuilds"."#,
+    );
 }
