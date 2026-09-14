@@ -34,7 +34,14 @@ pub enum ScriptsPrependNodePath {
 /// 4. `extra_bin_paths` (caller-supplied),
 /// 5. `dirname(node_execpath)` when `scripts_prepend_node_path` is
 ///    [`Always`](ScriptsPrependNodePath::Always),
-/// 6. `original_path` (typically the inherited system PATH).
+/// 6. `script_bin_dir`, the embedding host's own executables,
+/// 7. `original_path` (typically the inherited system PATH).
+///
+/// `script_bin_dir` sits immediately above `original_path` because a host
+/// that has no seam for it prepends the directory to the process `PATH`
+/// instead, which lands it in exactly that slot. Keeping the slot lets such
+/// a host stop touching the environment — and stop moving every cache key
+/// derived from it — without changing what a script resolves.
 #[must_use]
 pub fn extend_path(
     wd: &Path,
@@ -43,6 +50,7 @@ pub fn extend_path(
     extra_bin_paths: &[PathBuf],
     scripts_prepend_node_path: ScriptsPrependNodePath,
     node_execpath: Option<&Path>,
+    script_bin_dir: Option<&Path>,
 ) -> OsString {
     let mut path_arr: Vec<PathBuf> = Vec::new();
 
@@ -70,7 +78,12 @@ pub fn extend_path(
         path_arr.push(parent.to_path_buf());
     }
 
-    // 6. originalPath at the end.
+    // 6. The embedding host's own bin dir.
+    if let Some(p) = script_bin_dir {
+        path_arr.push(p.to_path_buf());
+    }
+
+    // 7. originalPath at the end.
     let mut joined: Vec<PathBuf> = path_arr;
     if let Some(orig) = original_path {
         for p in env::split_paths(orig) {

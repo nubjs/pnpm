@@ -93,6 +93,9 @@ pub struct PackOptions {
     /// The Node.js executable the pack lifecycle scripts are told they run
     /// under. `None` looks `node` up on `PATH`, as pnpm does.
     pub node_execpath: Option<PathBuf>,
+    /// A directory of the embedding host's own executables, added to the
+    /// `PATH` of the pack lifecycle scripts. `None` for pnpm.
+    pub script_bin_dir: Option<PathBuf>,
     /// Loaded pnpmfiles whose `beforePacking` hook runs against the
     /// published manifest before the file list is computed, in
     /// application order (config-dependency plugin pnpmfiles first, then
@@ -687,6 +690,7 @@ fn run_scripts_if_present<Reporter: self::Reporter>(
         extra_bin_paths: &opts.extra_bin_paths,
         extra_env: &opts.extra_env,
         node_execpath: opts.node_execpath.as_deref(),
+        script_bin_dir: opts.script_bin_dir.as_deref(),
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: Some(&opts.user_agent),

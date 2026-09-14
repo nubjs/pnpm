@@ -718,6 +718,7 @@ pub(super) fn run_stage(
             ctx.config.scripts_prepend_node_path,
         ),
         node_execpath: ctx.config.embedder.node_execpath,
+        script_bin_dir: ctx.config.embedder.resolve_script_bin_dir(),
         npm_execpath: None,
         user_agent: Some(&ctx.config.user_agent),
         extra_env: ctx.extra_env,

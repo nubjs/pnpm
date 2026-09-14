@@ -10831,6 +10831,7 @@ fn a_project_lifecycle_script_is_told_the_node_the_host_supplies() {
     let config = Config {
         embedder: pnpm_config::Embedder {
             node_execpath: Some(host_node),
+            script_bin_dir: None,
             ..pnpm_config::Embedder::PNPM
         },
         ..Config::default()

@@ -333,6 +333,7 @@ async fn git_hosted_cas_paths<Reporter: self::Reporter>(
         scripts_prepend_node_path: exec_scripts_prepend_node_path(config),
         script_shell: None,
         node_execpath: config.embedder.node_execpath,
+        script_bin_dir: config.embedder.resolve_script_bin_dir(),
         npm_execpath: None,
         // Nothing here is allowed to build, so no package
         // manager has to be provided to it.

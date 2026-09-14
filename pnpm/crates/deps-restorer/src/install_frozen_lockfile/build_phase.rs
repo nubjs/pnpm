@@ -277,6 +277,7 @@ fn build_modules<'a>(
         patches,
         scripts_prepend_node_path: crate::build_modules::exec_scripts_prepend_node_path(config),
         node_execpath: config.embedder.node_execpath,
+        script_bin_dir: config.embedder.resolve_script_bin_dir(),
         script_shell: config.script_shell.as_deref().map(Path::new),
         shell_emulator: config.shell_emulator,
         extra_env: inputs.extra_env,

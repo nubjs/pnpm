@@ -58,6 +58,10 @@ pub struct GitFetcher<'a> {
     pub scripts_prepend_node_path: ScriptsPrependNodePath,
     pub script_shell: Option<&'a Path>,
     pub node_execpath: Option<&'a Path>,
+    /// A directory of the embedding host's own executables, added to the
+    /// `PATH` of the scripts a git-hosted package is prepared with.
+    /// `None` for pnpm.
+    pub script_bin_dir: Option<&'a Path>,
     pub npm_execpath: Option<&'a Path>,
     /// The running pnpm, or the executable an embedding host names in its
     /// place, used to provide the package manager the dependency's build
@@ -191,6 +195,7 @@ impl<'a> GitFetcher<'a> {
             scripts_prepend_node_path: self.scripts_prepend_node_path,
             script_shell: self.script_shell,
             node_execpath: self.node_execpath,
+            script_bin_dir: self.script_bin_dir,
             npm_execpath: self.npm_execpath,
             pnpm_execpath: self.pnpm_execpath,
             extra_bin_paths: &[],

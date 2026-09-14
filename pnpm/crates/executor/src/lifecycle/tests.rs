@@ -94,6 +94,7 @@ fn lifecycle_emits_script_stdio_and_exit_in_order() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -202,6 +203,7 @@ fn lifecycle_events_carry_optional_flag() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -273,6 +275,7 @@ fn lifecycle_emits_exit_with_nonzero_code_on_failure() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -321,6 +324,7 @@ fn lifecycle_runs_under_silent_reporter() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -334,6 +338,70 @@ fn lifecycle_runs_under_silent_reporter() {
 
     let ran = run_postinstall_hooks::<SilentReporter>(&opts).expect("postinstall");
     assert!(ran, "postinstall script should report executed: ran={ran}");
+}
+
+/// The dependency-lifecycle path builds its own `PATH` — `prepare_lifecycle_path`
+/// rather than `run_script`'s `child_env` — so a host's bin directory reaching a
+/// `pnpm run` script proves nothing about a `postinstall`. Same guarantee, second
+/// spawn site: the shim resolves for the script, and the process is untouched.
+#[test]
+#[cfg_attr(target_os = "windows", ignore = "uses a POSIX shell script body")]
+fn a_script_bin_dir_reaches_a_lifecycle_script_and_never_the_process() {
+    let dir = tempdir().expect("create temp dir");
+    let pkg_root = dir.path();
+    let shims = pkg_root.join("host-shim-1234-abcd");
+    fs::create_dir_all(&shims).expect("create the shim dir");
+    let shim = shims.join("probe-shim");
+    fs::write(&shim, "#!/bin/sh\nprintf ok\n").expect("write the shim");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("chmod the shim");
+    }
+
+    let marker = pkg_root.join("out.txt");
+    let manifest = serde_json::json!({
+        "name": "z",
+        "version": "1.0.0",
+        "scripts": { "postinstall": format!(r#"probe-shim > "{}""#, marker.display()) },
+    });
+    fs::write(pkg_root.join("package.json"), manifest.to_string()).expect("write manifest");
+
+    let extra_env: HashMap<String, String> = HashMap::new();
+    let extra_bin_paths: Vec<std::path::PathBuf> = vec![];
+    let opts = RunPostinstallHooks {
+        dep_path: "/z@1.0.0",
+        pkg_root,
+        root_modules_dir: pkg_root,
+        init_cwd: pkg_root,
+        extra_bin_paths: &extra_bin_paths,
+        extra_env: &extra_env,
+        node_execpath: None,
+        script_bin_dir: Some(&shims),
+        npm_execpath: None,
+        node_gyp_path: None,
+        user_agent: None,
+        unsafe_perm: true,
+        node_gyp_bin: None,
+        scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+        script_shell: None,
+        shell_emulator: false,
+        optional: false,
+    };
+
+    let before = std::env::var_os("PATH");
+    let ran = run_postinstall_hooks::<SilentReporter>(&opts).expect("postinstall");
+    assert!(ran, "postinstall script should report executed");
+    assert_eq!(
+        std::env::var_os("PATH"),
+        before,
+        "a lifecycle script must not edit the process PATH"
+    );
+    assert_eq!(
+        fs::read_to_string(&marker).expect("read marker"),
+        "ok",
+        "the shim dir's command should resolve for the lifecycle script",
+    );
 }
 
 #[test]
@@ -351,6 +419,7 @@ fn missing_manifest_returns_false() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -437,6 +506,7 @@ fn child_sees_stamped_npm_package_and_preserves_user_config() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -487,6 +557,7 @@ fn malformed_manifest_propagates_error() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -544,6 +615,7 @@ fn shell_emulator_lifecycle_emits_stdio_and_a_failing_exit() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
+        script_bin_dir: None,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,

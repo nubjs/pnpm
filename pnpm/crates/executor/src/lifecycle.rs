@@ -86,6 +86,9 @@ pub struct RunPostinstallHooks<'a> {
     /// on `PATH`. Required for native postinstalls that shell out
     /// via `$NODE`.
     pub node_execpath: Option<&'a Path>,
+    /// A directory of the embedding host's own executables, added to the
+    /// script's `PATH` just above the inherited one. `None` for pnpm.
+    pub script_bin_dir: Option<&'a Path>,
     /// Path written into `npm_execpath` so postinstalls can re-invoke
     /// the package manager. When `None`, `std::env::current_exe()`
     /// is used.
@@ -404,6 +407,7 @@ fn prepare_lifecycle_path(
         opts.extra_bin_paths,
         opts.scripts_prepend_node_path,
         opts.node_execpath,
+        opts.script_bin_dir,
     );
 
     Ok(path_env)

@@ -59,6 +59,7 @@ pub struct PreparePackageOptions<'a> {
     pub scripts_prepend_node_path: ScriptsPrependNodePath,
     pub script_shell: Option<&'a Path>,
     pub node_execpath: Option<&'a Path>,
+    pub script_bin_dir: Option<&'a Path>,
     pub npm_execpath: Option<&'a Path>,
     /// The running pnpm, or the executable an embedding host names in its
     /// place, which the package-manager shims forward to. Without it pnpm
@@ -136,6 +137,7 @@ impl PreparePackageOptions<'_> {
             extra_bin_paths,
             extra_env: self.extra_env,
             node_execpath: self.node_execpath,
+            script_bin_dir: self.script_bin_dir,
             npm_execpath: self.npm_execpath,
             node_gyp_path: None,
             user_agent: self.user_agent,

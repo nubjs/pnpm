@@ -1,5 +1,5 @@
 use super::CargoCache;
-use std::{fs, process::Command};
+use std::{collections::HashMap, env, fs, process::Command};
 
 fn project() -> tempfile::TempDir {
     let project = tempfile::tempdir().unwrap();
@@ -251,4 +251,28 @@ fn snapshots_preserve_read_only_files() {
     let metadata = fs::metadata(restored.target.join("read-only")).unwrap();
     assert!(metadata.permissions().readonly());
     assert_eq!(metadata.modified().unwrap(), timestamp);
+}
+
+/// The cache key is a function of the process environment and the task's own
+/// `extra` map, and `PATH` is among the keys it keeps. So anything the engine
+/// adds to either — a directory an embedding host contributes for its shims,
+/// above all, whose name carries a pid — moves the key on every run and the
+/// cache is written but never restored. `Embedder::script_bin_dir` exists so
+/// that directory reaches a spawned script without passing through here.
+#[test]
+fn the_cache_environment_adds_nothing_of_its_own_to_path() {
+    let extra = HashMap::from([("RUSTFLAGS".to_string(), "-C debuginfo=0".to_string())]);
+    let environment = super::cache_environment(&extra, &[]);
+
+    assert_eq!(
+        environment.get("PATH").map(String::as_str),
+        env::var("PATH").ok().as_deref(),
+        "PATH in the key must be the process PATH verbatim",
+    );
+    assert_eq!(
+        environment.get("RUSTFLAGS").map(String::as_str),
+        Some("-C debuginfo=0"),
+        "the task's own extra environment is still hashed",
+    );
+    assert_eq!(super::cache_environment(&extra, &[]), environment, "the key must be stable");
 }

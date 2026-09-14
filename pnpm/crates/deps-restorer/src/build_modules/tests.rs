@@ -474,6 +474,7 @@ fn build_modules_collects_ignored_builds() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -539,6 +540,7 @@ fn mutated_slots_is_false_when_every_build_is_ignored() {
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
         node_execpath: None,
+        script_bin_dir: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -603,6 +605,7 @@ fn mutated_slots_is_true_when_a_script_runs() {
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
         node_execpath: None,
+        script_bin_dir: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -667,6 +670,7 @@ fn a_build_script_is_told_the_node_the_host_supplies() {
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
         node_execpath: Some(&host_node),
+        script_bin_dir: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -737,6 +741,7 @@ fn ignore_scripts_skips_build_without_collecting_ignored() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -799,6 +804,7 @@ fn cached_requires_build_false_skips_package_dir_probe() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -876,6 +882,7 @@ fn build_modules_collects_ignored_builds_under_concurrency() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -950,6 +957,7 @@ fn build_modules_excludes_explicit_deny_from_ignored() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1041,6 +1049,7 @@ fn do_not_fail_on_optional_dep_with_failing_postinstall() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1210,6 +1219,7 @@ fn using_side_effects_cache_skips_rebuild() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1344,6 +1354,7 @@ fn corrupt_side_effects_cache_falls_back_to_rebuild() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1469,6 +1480,7 @@ fn materialization_failure_on_incomplete_slot_is_fatal() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1543,6 +1555,7 @@ fn side_effects_cache_disabled_bypasses_the_gate() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1615,6 +1628,7 @@ fn fail_when_failing_postinstall_is_required() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1711,6 +1725,7 @@ fn frozen_backstop_run(
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2042,6 +2057,7 @@ async fn write_path_populates_side_effects_row() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2172,6 +2188,7 @@ async fn write_path_disabled_skips_upload() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2272,6 +2289,7 @@ async fn frozen_store_skips_side_effects_upload() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2431,6 +2449,7 @@ async fn upload_error_does_not_interrupt_install() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2696,6 +2715,7 @@ new file mode 100644
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2816,6 +2836,7 @@ new file mode 100644
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2908,6 +2929,7 @@ async fn missing_patch_file_path_errors_with_diagnostic() {
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
         node_execpath: None,
+        script_bin_dir: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -3177,6 +3199,7 @@ fn rebuild_selection_runs_only_selected_scripts() {
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
         node_execpath: None,
+        script_bin_dir: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),

@@ -240,6 +240,11 @@ pub struct BuildModules<'a> {
     /// Node.js executable the host runs it under. `None` looks `node` up on
     /// `PATH`.
     pub node_execpath: Option<&'a Path>,
+    /// Mirrors `config.embedder.script_bin_dir`, already resolved. Threaded
+    /// through to [`RunPostinstallHooks::script_bin_dir`], so a build script
+    /// finds the embedding host's own executables just ahead of the
+    /// inherited `PATH`. `None` for pnpm.
+    pub script_bin_dir: Option<&'a Path>,
     /// Mirrors `config.script_shell`. Threaded through to
     /// [`RunPostinstallHooks::script_shell`], so a workspace that
     /// configures a shell gets it for build scripts too, not only for
@@ -449,6 +454,7 @@ impl BuildModules<'_> {
             user_agent: self.user_agent,
             scripts_prepend_node_path: self.scripts_prepend_node_path,
             node_execpath: self.node_execpath,
+            script_bin_dir: self.script_bin_dir,
             script_shell: self.script_shell,
             shell_emulator: self.shell_emulator,
             unsafe_perm: self.unsafe_perm,

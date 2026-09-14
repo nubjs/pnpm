@@ -64,6 +64,8 @@ pub struct GitHostedTarballFetcher<'a> {
     pub scripts_prepend_node_path: ScriptsPrependNodePath,
     pub script_shell: Option<&'a Path>,
     pub node_execpath: Option<&'a Path>,
+    /// See the matching field on [`crate::GitFetcher`].
+    pub script_bin_dir: Option<&'a Path>,
     pub npm_execpath: Option<&'a Path>,
     /// See the matching field on [`crate::GitFetcher`].
     pub pnpm_execpath: Option<&'a Path>,
@@ -193,6 +195,7 @@ impl<'a> GitHostedTarballFetcher<'a> {
             scripts_prepend_node_path: self.scripts_prepend_node_path,
             script_shell: self.script_shell,
             node_execpath: self.node_execpath,
+            script_bin_dir: self.script_bin_dir,
             npm_execpath: self.npm_execpath,
             pnpm_execpath: self.pnpm_execpath,
             extra_bin_paths: &[],

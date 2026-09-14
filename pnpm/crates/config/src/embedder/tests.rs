@@ -23,6 +23,8 @@ const NUB: Embedder = Embedder {
     patched_dependencies_writer: None,
     node_execpath: None,
     pnpm_execpath: None,
+
+    script_bin_dir: None,
     extract_observer: None,
     materialize_policy: None,
     settings_file_display_name: "nub.jsonc",
@@ -447,6 +449,47 @@ fn commands_reading_the_lockfile_by_name_read_the_profiles_files() {
     assert!(finds(&current, NUB));
     assert!(finds(&retired, NUB));
     assert!(!finds(&current, Embedder::PNPM), "pnpm's profile reads pnpm-lock.yaml only");
+}
+
+thread_local! {
+    /// What the bin-dir provider below answers with, for the same reason
+    /// [`HOST_SETTINGS`] is a thread-local: a provider is a plain function
+    /// and captures nothing.
+    static HOST_BIN_DIR: std::cell::Cell<Option<&'static std::path::Path>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn provided_host_bin_dir() -> Option<&'static std::path::Path> {
+    HOST_BIN_DIR.get()
+}
+
+/// The host is asked for the directory each time, not once when the profile
+/// is built — a directory named per process does not exist yet when a `const`
+/// profile is written, and a host may create it lazily. pnpm supplies no
+/// provider, so it never gains an entry.
+#[test]
+fn the_script_bin_dir_is_asked_of_the_host_each_time() {
+    assert!(Embedder::PNPM.script_bin_dir.is_none());
+    assert_eq!(Embedder::PNPM.resolve_script_bin_dir(), None);
+    assert_eq!(Config::default().embedder.resolve_script_bin_dir(), None);
+
+    let embedder = Embedder { script_bin_dir: Some(provided_host_bin_dir), ..NUB };
+    assert_eq!(embedder.resolve_script_bin_dir(), None, "no directory yet");
+
+    HOST_BIN_DIR.set(Some(std::path::Path::new("/tmp/nub-node-shim-4171-9c2a")));
+    assert_eq!(
+        embedder.resolve_script_bin_dir(),
+        Some(std::path::Path::new("/tmp/nub-node-shim-4171-9c2a")),
+    );
+
+    HOST_BIN_DIR.set(Some(std::path::Path::new("/tmp/nub-node-shim-4172-31f0")));
+    assert_eq!(
+        embedder.resolve_script_bin_dir(),
+        Some(std::path::Path::new("/tmp/nub-node-shim-4172-31f0")),
+        "the profile must not cache the first answer",
+    );
+
+    HOST_BIN_DIR.set(None);
 }
 
 /// A host's own settings file is what the maturity-gate diagnostics name, and

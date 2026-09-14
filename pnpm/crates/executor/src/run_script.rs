@@ -94,6 +94,9 @@ pub struct RunScript<'a> {
     pub scripts_prepend_node_path: ScriptsPrependNodePath,
     /// Path to a `node` binary for `npm_node_execpath` / `NODE`.
     pub node_execpath: Option<&'a Path>,
+    /// A directory of the embedding host's own executables, added to the
+    /// script's `PATH` just above the inherited one. `None` for pnpm.
+    pub script_bin_dir: Option<&'a Path>,
     /// Path written into `npm_execpath`.
     pub npm_execpath: Option<&'a Path>,
     /// Value written into `npm_config_user_agent`.
@@ -182,6 +185,7 @@ fn child_env(opts: &RunScript<'_>, command: &str) -> HashMap<String, String> {
         opts.extra_bin_paths,
         opts.scripts_prepend_node_path,
         opts.node_execpath,
+        opts.script_bin_dir,
     );
 
     let mut child_env = built.env;

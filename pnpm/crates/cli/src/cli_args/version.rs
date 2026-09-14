@@ -505,6 +505,7 @@ fn run_version_lifecycle_hook<Reporter: pnpm_reporter::Reporter>(
         extra_bin_paths: &config.extra_bin_paths,
         extra_env: &config.extra_env,
         node_execpath: config.embedder.node_execpath,
+        script_bin_dir: config.embedder.resolve_script_bin_dir(),
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: Some(&config.user_agent),

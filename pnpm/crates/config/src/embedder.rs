@@ -268,6 +268,35 @@ pub struct Embedder {
     /// at a version it did not ask for.
     pub pnpm_execpath: Option<&'static std::path::Path>,
 
+    /// A directory of this host's own executables, put on the `PATH` of
+    /// every script the engine spawns — and nowhere else. pnpm supplies
+    /// none.
+    ///
+    /// A host that fronts scripts with shims of its own has one obvious
+    /// place to put them: the process `PATH`, before the engine is ever
+    /// called. That works, and it poisons every key the engine derives from
+    /// the environment. The build pipeline's Cargo cache hashes `PATH` among
+    /// its inputs, and a host whose shim directory is named per process —
+    /// carrying a pid, or a nonce against collisions — moves that key on
+    /// every run, so the cache is written and never restored. The same
+    /// directory in `extraBinPaths` moves the task run-state fingerprint for
+    /// the same reason, and `extraEnv` is hashed into the Cargo key directly.
+    ///
+    /// Supplying it here keeps it out of all three: the engine reads the
+    /// process environment as it found it, and adds the directory only when
+    /// it builds a script's `PATH`. It lands immediately ahead of the
+    /// inherited `PATH`, which is exactly where a host-prepended entry would
+    /// have sat, so a script resolves commands in the same order as before —
+    /// the project's `node_modules/.bin`, then `extraBinPaths`, then
+    /// `scriptsPrependNodePath`'s Node directory, then these shims, then
+    /// whatever the user's `PATH` already offered.
+    ///
+    /// A function rather than a path because a profile is a `const`: a
+    /// directory named per process cannot be spelled in one. It is asked
+    /// each time a script's `PATH` is built, so a host that creates the
+    /// directory lazily may answer `None` until it exists.
+    pub script_bin_dir: Option<ScriptBinDirProvider>,
+
     /// An observer notified of every package this run extracts into the
     /// store, for a host that inspects package contents — pnpm registers
     /// none. Supplied as a function rather than as the observer itself so
@@ -308,6 +337,10 @@ pub type OverridesWriter = fn(&std::path::Path, &[(&str, &str)]) -> std::io::Res
 pub type PatchedDependenciesWriter =
     fn(&std::path::Path, &[(&str, Option<&str>)]) -> std::io::Result<()>;
 
+/// Answers with the directory of host executables to put on a spawned
+/// script's `PATH`. See [`Embedder::script_bin_dir`].
+pub type ScriptBinDirProvider = fn() -> Option<&'static std::path::Path>;
+
 /// Supplies the observer a host wants notified of each extraction. See
 /// [`Embedder::extract_observer`].
 pub type ExtractObserverProvider = fn() -> std::sync::Arc<dyn pnpm_store_dir::ExtractObserver>;
@@ -345,10 +378,20 @@ impl Embedder {
         patched_dependencies_writer: None,
         node_execpath: None,
         pnpm_execpath: None,
+
+        script_bin_dir: None,
         extract_observer: None,
         materialize_policy: None,
         dlx_exits_like_child: true,
     };
+
+    /// This run's [`script_bin_dir`](Self::script_bin_dir), asked of the
+    /// host. Call it where a script's `PATH` is built, not once at startup:
+    /// a host may create the directory lazily.
+    #[must_use]
+    pub fn resolve_script_bin_dir(&self) -> Option<&'static std::path::Path> {
+        self.script_bin_dir.and_then(|ask| ask())
+    }
 
     /// The wanted lockfile a command reads by name: [`Self::lockfile_basename`],
     /// then [`Self::lockfile_legacy_basenames`].
