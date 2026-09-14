@@ -109,6 +109,21 @@ pub struct Embedder {
     /// Defaults to `allowBuilds`, so standalone pnpm's wording is unchanged.
     pub allow_builds_display_name: &'static str,
 
+    /// The file this host records overrides in, spelled as help text
+    /// names it, for the flag that writes one.
+    ///
+    /// pnpm keeps overrides in its workspace manifest, so `audit --fix`
+    /// says it adds them there. A host that records them through
+    /// [`Self::overrides_writer`] puts them somewhere else, and
+    /// substituting [`Self::settings_file_display_name`] does not reach
+    /// that: a host whose settings live in one file can record overrides
+    /// in another — the neutral `overrides` of `package.json`, say —
+    /// which leaves the flag describing a file it never writes.
+    ///
+    /// `None` while the host records them where pnpm does, which keeps
+    /// the sentence pnpm wrote true.
+    pub overrides_file_display_name: Option<&'static str>,
+
     /// Hidden entries this host writes into a modules directory beside
     /// pnpm's own, which `clean` removes along with them.
     ///
@@ -367,6 +382,7 @@ impl Embedder {
         virtual_store_dirname: ".pnpm",
         settings_file_display_name: "pnpm-workspace.yaml",
         allow_builds_display_name: "allowBuilds",
+        overrides_file_display_name: None,
         hidden_modules_dir_entries: &[],
         reads_pnpm_config: true,
         reads_npm_config_env: false,

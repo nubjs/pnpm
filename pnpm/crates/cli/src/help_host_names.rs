@@ -34,6 +34,9 @@ struct HostNames {
     /// Whether the host declares a workspace's projects in `package.json`'s
     /// `workspaces` instead of in `pnpm-workspace.yaml`.
     workspaces_in_manifest: bool,
+    /// The file the host records overrides in, when that is not the file
+    /// its settings come from.
+    overrides_file: Option<&'static str>,
 }
 
 impl HostNames {
@@ -44,6 +47,7 @@ impl HostNames {
             lockfile: embedder.lockfile_basename,
             settings_file: own_settings.then_some(embedder.settings_file_display_name),
             workspaces_in_manifest: own_settings && embedder.workspaces_from_package_manifest,
+            overrides_file: embedder.overrides_file_display_name,
         }
     }
 
@@ -52,6 +56,7 @@ impl HostNames {
             && self.lockfile == PNPM_LOCKFILE
             && self.settings_file.is_none()
             && !self.workspaces_in_manifest
+            && self.overrides_file.is_none()
     }
 }
 
@@ -96,6 +101,11 @@ fn rewrite_arg(mut arg: Arg, names: &HostNames) -> Arg {
     {
         return arg.help(help);
     }
+    if let Some(file) = names.overrides_file
+        && arg.get_id().as_str() == AUDIT_FIX
+    {
+        return arg.help(audit_fix_help(file));
+    }
     if let Some(help) = arg.get_help().map(ToString::to_string) {
         arg = arg.help(substitute(&help, names));
     }
@@ -121,6 +131,28 @@ fn workspace_declaration_help(arg_id: &str) -> Option<&'static str> {
         ),
         _ => None,
     }
+}
+
+/// `audit --fix`'s argument, the only one whose help names the file an
+/// override is written to. `install`'s `fix_lockfile` is a different id.
+const AUDIT_FIX: &str = "fix";
+
+/// Help for `audit --fix` under a host that records overrides in a file of
+/// its own.
+///
+/// Rewritten whole for the same reason as
+/// [`workspace_declaration_help`]: the sentence names pnpm's workspace
+/// manifest because that is where pnpm puts an override, and the host puts
+/// it in a different file — which no substitution of the settings file
+/// reaches. A whole rewrite can go stale against a reworded upstream; a
+/// phrase match would instead stop firing and leave the wrong file named.
+fn audit_fix_help(overrides_file: &str) -> String {
+    format!(
+        "Fix the audited vulnerabilities using the specified method: \"override\" or \"update\". \
+         \"override\" adds overrides to `{overrides_file}` to force non-vulnerable versions; \
+         \"update\" re-resolves the lockfile to non-vulnerable versions. Defaults to \
+         \"override\" when no method is given"
+    )
 }
 
 fn substitute(text: &str, names: &HostNames) -> String {

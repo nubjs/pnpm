@@ -5,11 +5,14 @@ use super::{HostNames, substitute, with_host_names};
 use crate::cli_args::CliArgs;
 
 /// A host with names of its own throughout: its program, its lockfile, a
-/// settings file of its own, and workspaces declared in `package.json`.
+/// settings file of its own, workspaces declared in `package.json`, and
+/// overrides recorded there too rather than in the file its settings come
+/// from.
 const HOST: Embedder = Embedder {
     program_name: "host",
     lockfile_basename: "host.lock",
     settings_file_display_name: "host.jsonc",
+    overrides_file_display_name: Some("package.json"),
     reads_pnpm_config: false,
     workspaces_from_package_manifest: true,
     ..Embedder::PNPM
@@ -99,6 +102,46 @@ fn a_hosts_help_names_its_own_files_in_every_command() {
         host.contains("overriding the `workspaces` field of `package.json`"),
         "--workspace-packages describes the host's workspace declaration"
     );
+}
+
+/// `audit --fix` writes an override, and a host that keeps overrides outside
+/// the file its settings come from has that flag name the file it really
+/// writes. Substituting the settings file is what this guards against: it
+/// leaves the sentence readable and wrong, pointing the user at a file the
+/// fix never touches.
+#[test]
+fn audit_fix_names_the_file_the_host_records_an_override_in() {
+    let fix_help = |embedder: &Embedder| {
+        let cmd = with_host_names(CliArgs::command(), embedder);
+        let audit = cmd.get_subcommands().find(|s| s.get_name() == "audit").expect("audit");
+        audit
+            .get_arguments()
+            .find(|a| a.get_long() == Some("fix"))
+            .expect("--fix")
+            .get_help()
+            .expect("help")
+            .to_string()
+    };
+
+    let host = fix_help(&HOST);
+    assert!(host.contains("adds overrides to `package.json`"), "got: {host}");
+    assert!(
+        !host.contains("host.jsonc"),
+        "the settings file is not where the override lands: {host}"
+    );
+
+    // The rest of the sentence is still pnpm's, so the rewrite replaces the
+    // file rather than the flag's meaning.
+    assert!(host.contains("re-resolves the lockfile to non-vulnerable versions"), "got: {host}");
+
+    // A host that records overrides where pnpm does keeps the substituted
+    // settings file, so the rewrite above is the new field's doing.
+    let same_file = fix_help(&Embedder { overrides_file_display_name: None, ..HOST });
+    assert!(same_file.contains("adds overrides to `host.jsonc`"), "got: {same_file}");
+
+    // ...and pnpm's own help is untouched.
+    let pnpm = fix_help(&Embedder::PNPM);
+    assert!(pnpm.contains("adds overrides to `pnpm-workspace.yaml`"), "got: {pnpm}");
 }
 
 /// A file, a path segment and a host are not the program's name, nor pnpm's
