@@ -1089,7 +1089,9 @@ pub async fn approve_global_builds<Reporter: self::Reporter + 'static>(
         return Ok(());
     }
     let pending = pending.into_iter().collect::<Vec<_>>();
-    let Some(decision) = args.decide::<Reporter>(&pending)? else {
+    let Some(decision) =
+        args.decide::<Reporter>(&pending, base_config.embedder.allow_builds_display_name)?
+    else {
         return Ok(());
     };
 

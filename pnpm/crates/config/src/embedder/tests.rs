@@ -25,6 +25,7 @@ const NUB: Embedder = Embedder {
     extract_observer: None,
     materialize_policy: None,
     settings_file_display_name: "nub.jsonc",
+    allow_builds_display_name: "allowScripts",
     dlx_exits_like_child: false,
 };
 

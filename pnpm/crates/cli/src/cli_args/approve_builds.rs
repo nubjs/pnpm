@@ -82,7 +82,9 @@ impl ApproveBuildsArgs {
             println!("There are no packages awaiting approval");
             return Ok(None);
         }
-        let Some(decision) = self.decide::<Reporter>(&pending)? else {
+        let Some(decision) =
+            self.decide::<Reporter>(&pending, initial_config.embedder.allow_builds_display_name)?
+        else {
             return Ok(None);
         };
 
@@ -103,9 +105,12 @@ impl ApproveBuildsArgs {
         Ok(Some((state(true)?, build_packages)))
     }
 
+    /// `allow_list` is the allow-list as the running program's users know it
+    /// ([`pnpm_config::Embedder::allow_builds_display_name`]).
     pub(crate) fn decide<Reporter: self::Reporter>(
         self,
         pending: &[String],
+        allow_list: &str,
     ) -> miette::Result<Option<ApprovalDecision>> {
         self.validate()?;
         let ApproveBuildsArgs { packages, all, global: _ } = self;
@@ -141,7 +146,7 @@ impl ApproveBuildsArgs {
 
         // Only the interactive path asks for confirmation: named
         // packages and `--all` are the answer already.
-        if !all && packages.is_empty() && !confirm_selected_builds(&build_packages)? {
+        if !all && packages.is_empty() && !confirm_selected_builds(&build_packages, allow_list)? {
             return Ok(None);
         }
 
@@ -170,12 +175,17 @@ fn named_decisions(approved: &[String], denied: &[String]) -> BTreeMap<String, b
 
 /// Whether the interactive run may proceed. An empty selection needs no
 /// confirmation — it denies every pending package.
-fn confirm_selected_builds(build_packages: &[String]) -> miette::Result<bool> {
+fn confirm_selected_builds(build_packages: &[String], allow_list: &str) -> miette::Result<bool> {
     if build_packages.is_empty() {
-        println!("All packages were added to allowBuilds with value false.");
+        println!("{}", all_denied_notice(allow_list));
         return Ok(true);
     }
     confirm_builds(build_packages)
+}
+
+/// What an interactive run that selected nothing reports.
+fn all_denied_notice(allow_list: &str) -> String {
+    format!("All packages were added to {allow_list} with value false.")
 }
 
 pub(crate) fn write_approval_settings(

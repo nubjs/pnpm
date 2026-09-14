@@ -1,5 +1,5 @@
 use super::render_ignored_builds;
-use pnpm_config::Config;
+use pnpm_config::{Config, Embedder};
 use std::{fs, path::Path};
 use tempfile::tempdir;
 
@@ -81,5 +81,24 @@ fn reports_cannot_identify_when_no_node_modules() {
     assert_eq!(
         output,
         "Automatically ignored builds during installation:\n  Cannot identify as no node_modules found\n\nExplicitly ignored package builds (via allowBuilds):\n  qar\n  zoo\n",
+    );
+}
+
+/// A host reads its approvals back under a name of its own and runs
+/// `rebuild` itself, so both halves of the advice move with the profile. The
+/// tests above pin pnpm's own wording through the default profile.
+#[test]
+fn a_hosts_advice_names_its_own_allow_list_and_program() {
+    let dir = tempdir().unwrap();
+    let mut config = config_with(dir.path(), Some(&["foo@1.0.0"]), &["bar"]);
+    config.embedder = Embedder {
+        program_name: "nub",
+        allow_builds_display_name: "allowScripts",
+        ..Embedder::PNPM
+    };
+    let output = render_ignored_builds(&config).unwrap();
+    assert_eq!(
+        output,
+        "Automatically ignored builds during installation:\n  foo\nhint: To allow the execution of build scripts for a package, add its name to \"allowScripts\" and set to \"true\", then run \"nub rebuild\".\nhint: For example:\nhint: allowScripts:\nhint:   esbuild: true\nhint: If you don't want to build a package, set it to \"false\" instead.\n\nExplicitly ignored package builds (via allowScripts):\n  bar\n",
     );
 }

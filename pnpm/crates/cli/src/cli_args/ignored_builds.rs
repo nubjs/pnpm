@@ -4,7 +4,7 @@ use miette::IntoDiagnostic;
 use pnpm_config::Config;
 use pnpm_modules_yaml::{Host, Modules, read_modules_manifest};
 use pnpm_package_manager::allow_build_key_from_ignored_build;
-use std::path::PathBuf;
+use std::{fmt::Write, path::PathBuf};
 
 /// Print the list of packages whose build scripts were not run during
 /// installation.
@@ -61,6 +61,11 @@ pub(crate) fn render_ignored_builds(config: &Config) -> miette::Result<String> {
         list.retain(|build| !disallowed_builds.contains(build));
     }
 
+    // Named through the profile: a host that reads its approvals back under
+    // another name, and serves `rebuild` itself, must not send its user to
+    // pnpm's field and pnpm's binary.
+    let field = config.embedder.allow_builds_display_name;
+    let program = config.embedder.program_name;
     let mut output = String::from("Automatically ignored builds during installation:\n");
     match &automatically_ignored_builds {
         None => output.push_str("  Cannot identify as no node_modules found"),
@@ -68,15 +73,16 @@ pub(crate) fn render_ignored_builds(config: &Config) -> miette::Result<String> {
         Some(list) => {
             output.push_str("  ");
             output.push_str(&list.join("\n  "));
-            output.push_str(
-                "\nhint: To allow the execution of build scripts for a package, add its name to \"allowBuilds\" and set to \"true\", then run \"pnpm rebuild\".\nhint: For example:\nhint: allowBuilds:\nhint:   esbuild: true\nhint: If you don't want to build a package, set it to \"false\" instead.",
+            let _ = write!(
+                output,
+                "\nhint: To allow the execution of build scripts for a package, add its name to \"{field}\" and set to \"true\", then run \"{program} rebuild\".\nhint: For example:\nhint: {field}:\nhint:   esbuild: true\nhint: If you don't want to build a package, set it to \"false\" instead.",
             );
         }
     }
     output.push('\n');
 
     if !disallowed_builds.is_empty() {
-        output.push_str("\nExplicitly ignored package builds (via allowBuilds):\n  ");
+        let _ = write!(output, "\nExplicitly ignored package builds (via {field}):\n  ");
         output.push_str(&disallowed_builds.join("\n  "));
         output.push('\n');
     }

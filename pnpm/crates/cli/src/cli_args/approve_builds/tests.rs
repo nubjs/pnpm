@@ -1,8 +1,8 @@
 use pnpm_reporter::SilentReporter;
 
 use super::{
-    ApprovalDecision, ApproveBuildsArgs, ApproveBuildsError, partition_params, sort_unique,
-    write_approval_settings,
+    ApprovalDecision, ApproveBuildsArgs, ApproveBuildsError, all_denied_notice, partition_params,
+    sort_unique, write_approval_settings,
 };
 
 fn pending(names: &[&str]) -> Vec<String> {
@@ -49,13 +49,27 @@ fn reports_an_unknown_denied_package_as_pre_emptive() {
 #[test]
 fn rejects_contradictory_arguments() {
     let err = args(&["foo", "!foo"])
-        .decide::<SilentReporter>(&pending(&["foo"]))
+        .decide::<SilentReporter>(&pending(&["foo"]), "allowBuilds")
         .err()
         .expect("contradicting arguments are rejected");
     let ApproveBuildsError::ContradictingArgs(names) = approve_builds_error(err) else {
         panic!("expected ContradictingArgs");
     };
     assert_eq!(names, vec!["foo".to_string()]);
+}
+
+/// Denying every build interactively reports the allow-list under the name
+/// the running program reads it back by. pnpm's wording is its own profile's.
+#[test]
+fn the_all_denied_notice_names_the_profiles_allow_list() {
+    assert_eq!(
+        all_denied_notice(pnpm_config::Embedder::PNPM.allow_builds_display_name),
+        "All packages were added to allowBuilds with value false.",
+    );
+    assert_eq!(
+        all_denied_notice("allowScripts"),
+        "All packages were added to allowScripts with value false.",
+    );
 }
 
 #[test]

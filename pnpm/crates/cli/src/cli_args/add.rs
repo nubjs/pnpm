@@ -602,6 +602,7 @@ pub(crate) fn apply_allow_build(
     if !overlap.is_empty() {
         return Err(AllowBuildError::OverridingIgnoredBuiltDependencies {
             dependencies: overlap.join(", "),
+            allow_list: config.embedder.allow_builds_display_name,
         }
         .into());
     }
@@ -672,10 +673,15 @@ pub enum AllowBuildError {
     #[diagnostic(
         code(ERR_PNPM_OVERRIDING_IGNORED_BUILT_DEPENDENCIES),
         help(
-            "If you are sure you want to allow those dependencies to run installation scripts, remove them from the allowBuilds list (or change their value to true)."
+            "If you are sure you want to allow those dependencies to run installation scripts, remove them from the {allow_list} list (or change their value to true)."
         )
     )]
-    OverridingIgnoredBuiltDependencies { dependencies: String },
+    OverridingIgnoredBuiltDependencies {
+        dependencies: String,
+        /// The allow-list as the running program's users know it; see
+        /// [`pnpm_config::Embedder::allow_builds_display_name`].
+        allow_list: &'static str,
+    },
 
     #[display(
         "The --allow-build flag is missing a package name. Please specify the package name(s) that are allowed to run installation scripts."

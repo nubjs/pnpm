@@ -98,6 +98,17 @@ pub struct Embedder {
     /// unchanged.
     pub settings_file_display_name: &'static str,
 
+    /// The name this host's users know the build allow-list by, for a
+    /// message that tells them to edit it.
+    ///
+    /// pnpm calls it `allowBuilds`. A host that keeps the approvals somewhere
+    /// else — see [`Self::allow_builds_writer`] — reads them back under a name
+    /// of its own, and a hint naming pnpm's field sends the user to a setting
+    /// that changes nothing.
+    ///
+    /// Defaults to `allowBuilds`, so standalone pnpm's wording is unchanged.
+    pub allow_builds_display_name: &'static str,
+
     /// Whether the engine reads the configuration only pnpm defines: the
     /// `pnpm-workspace.yaml` search, the global `config.yaml` and `auth.ini`,
     /// `pnpm_config_*` / `PNPM_CONFIG_*` environment variables, and the
@@ -297,6 +308,7 @@ impl Embedder {
         lockfile_legacy_basenames: &[],
         virtual_store_dirname: ".pnpm",
         settings_file_display_name: "pnpm-workspace.yaml",
+        allow_builds_display_name: "allowBuilds",
         reads_pnpm_config: true,
         reads_npm_config_env: false,
         writes_settings_file: true,

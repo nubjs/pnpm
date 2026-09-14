@@ -1,6 +1,6 @@
 use super::{AddDependencyOptions, AddError, apply_allow_build, workspace_selectors};
 use crate::cargo_manifest::CargoDependencyKind;
-use pnpm_config::Config;
+use pnpm_config::{Config, Embedder};
 use pnpm_package_manifest::DependencyGroup;
 use pretty_assertions::assert_eq;
 
@@ -64,6 +64,30 @@ fn allow_build_rejects_a_package_the_root_disallows() {
         Some("ERR_PNPM_OVERRIDING_IGNORED_BUILT_DEPENDENCIES"),
     );
     assert!(!dir.path().join("pnpm-workspace.yaml").exists(), "a rejected apply persists nothing");
+}
+
+/// The rejection tells the user which list to edit, and a host reads that list
+/// back under its own name: pnpm's advice names `allowBuilds`, a host's names
+/// the list it keeps.
+#[test]
+fn allow_build_rejection_names_the_profiles_allow_list() {
+    for (embedder, list) in [
+        (Embedder::PNPM, "allowBuilds"),
+        (Embedder { allow_builds_display_name: "allowScripts", ..Embedder::PNPM }, "allowScripts"),
+    ] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut config = Config { embedder, ..Config::default() };
+        config.allow_builds.insert("esbuild".to_string(), false);
+
+        let err = apply_allow_build(&mut config, &["esbuild".to_string()], dir.path())
+            .expect_err("disallowed package is rejected");
+        assert_eq!(
+            err.help().map(|help| help.to_string()),
+            Some(format!(
+                "If you are sure you want to allow those dependencies to run installation scripts, remove them from the {list} list (or change their value to true)."
+            )),
+        );
+    }
 }
 
 #[test]
