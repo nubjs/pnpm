@@ -59,9 +59,9 @@ pub struct GitFetcher<'a> {
     pub script_shell: Option<&'a Path>,
     pub node_execpath: Option<&'a Path>,
     pub npm_execpath: Option<&'a Path>,
-    /// The running pnpm, used to provide the package manager the
-    /// dependency's build needs. `None` leaves the build to whatever is
-    /// installed on the host.
+    /// The running pnpm, or the executable an embedding host names in its
+    /// place, used to provide the package manager the dependency's build
+    /// needs. `None` leaves the build to whatever is installed on the host.
     pub pnpm_execpath: Option<&'a Path>,
     pub store_dir: &'a StoreDir,
     /// Used in log lines, and as the resolution id

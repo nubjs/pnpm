@@ -42,13 +42,22 @@ use std::{
 ///
 /// `None` when the executable is something other than pnpm itself — the
 /// Node.js addon runs this code inside `node`, where there is no pnpm
-/// binary to forward to — and the build then falls back to whatever
-/// package managers the host has installed.
+/// binary to forward to. A host that embeds the engine names its own
+/// executable instead; see [`pnpm_execpath`].
 static PNPM_EXECPATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
     let path = std::env::current_exe().ok()?;
     let stem = path.file_stem()?.to_str()?;
     (stem == "pnpm").then_some(path)
 });
+
+/// The executable a git-hosted dependency's package-manager shims forward
+/// to: the one the host names in
+/// [`Embedder::pnpm_execpath`](pnpm_config::Embedder::pnpm_execpath), and
+/// otherwise the running pnpm. With neither, the build falls back to
+/// whatever package managers the machine has installed.
+fn pnpm_execpath(config: &Config) -> Option<&'static Path> {
+    config.embedder.pnpm_execpath.or(PNPM_EXECPATH.as_deref())
+}
 
 /// Downloads a package tarball, extracts it, installs it to a virtual
 /// dir, then creates the symlink layout for the package. CAS file
@@ -521,7 +530,7 @@ impl InstallPackageBySnapshot<'_> {
             script_shell: None,
             node_execpath: config.embedder.node_execpath,
             npm_execpath: None,
-            pnpm_execpath: PNPM_EXECPATH.as_deref(),
+            pnpm_execpath: pnpm_execpath(config),
             store_dir: &config.store_dir,
             package_id: fetch.package_id,
             package_name: &package_name,
@@ -690,7 +699,7 @@ impl InstallPackageBySnapshot<'_> {
             script_shell: None,
             node_execpath: config.embedder.node_execpath,
             npm_execpath: None,
-            pnpm_execpath: PNPM_EXECPATH.as_deref(),
+            pnpm_execpath: pnpm_execpath(config),
             store_dir: &config.store_dir,
             package_id: fetch.package_id,
             requester: self.ctx.requester,

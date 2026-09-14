@@ -1534,3 +1534,100 @@ async fn an_unpinned_delegate_to_a_directory_keeps_its_resolution() {
     );
     drop(store_tmp);
 }
+
+/// A git-hosted dependency that pins its package manager is prepared through
+/// the executable the host names, rather than left to whatever package manager
+/// the machine has installed. The test binary is not named `pnpm`, so the
+/// host's executable is the only thing the shims could forward to; the
+/// stand-in records how each shim invoked it.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pinned_package_manager_is_provided_through_the_host_executable() {
+    use pnpm_testing_utils::git_repo::GitRepoFixture;
+    use std::{fs, os::unix::fs::PermissionsExt, path::Path, sync::atomic::AtomicU8};
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let repo = GitRepoFixture::init(root.path(), "pins-yarn");
+    repo.write_file(
+        "package.json",
+        r#"{"name":"pins-yarn","version":"1.0.0","packageManager":"yarn@1.22.22","scripts":{"prepare":"node -e 0"}}"#,
+    );
+    let commit = repo.commit("init");
+
+    let invocations = root.path().join("host-invocations");
+    let host_dir = root.path().join("host");
+    fs::create_dir_all(&host_dir).expect("create host dir");
+    let host_bin = host_dir.join("host-bin");
+    fs::write(&host_bin, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", invocations.display()))
+        .expect("write host executable");
+    fs::set_permissions(&host_bin, fs::Permissions::from_mode(0o755)).expect("chmod host");
+    let host_bin: &'static Path = Box::leak(host_bin.into_boxed_path());
+
+    let mut config = pnpm_config::Config::new();
+    config.store_dir = root.path().join("store").into();
+    config.embedder =
+        pnpm_config::Embedder { pnpm_execpath: Some(host_bin), ..pnpm_config::Embedder::PNPM };
+    let config = config.leak();
+
+    let layout = crate::VirtualStoreLayout::legacy(root.path().join("vstore"), 120);
+    let allow_build_policy = crate::AllowBuildPolicy::new(
+        std::collections::HashSet::default(),
+        std::collections::HashSet::default(),
+        true,
+    );
+    let skipped = crate::SkippedSnapshots::new();
+    let logged_methods = AtomicU8::new(0);
+    let verified_files_cache = pnpm_store_dir::SharedVerifiedFilesCache::default();
+    let metadata = pnpm_lockfile::PackageMetadata {
+        resolution: LockfileResolution::Git(pnpm_lockfile::GitResolution {
+            repo: repo.file_url(),
+            commit,
+            integrity: None,
+            path: None,
+        }),
+        ..registry_metadata()
+    };
+    let package_key: PackageKey = "pins-yarn@1.0.0".parse().expect("parse key");
+
+    let outcome = super::InstallPackageBySnapshot {
+        ctx: &crate::InstallContext {
+            config,
+            workspace_root: root.path(),
+            requester: "/project",
+            layout: &layout,
+            node_linker: pnpm_config::NodeLinker::Hoisted,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        store_index: None,
+        store_index_writer: None,
+        prefetched_cas_paths: None,
+        progress_reported: None,
+        tarball_mem_cache: None,
+        verified_files_cache: &verified_files_cache,
+        skipped: &skipped,
+        include_optional_dependencies: true,
+        runtime_platform_selector: &host_platform_selector(),
+        custom_fetcher_session: None,
+        defer_link: false,
+        link_concurrency_probe: None,
+    }
+    .run::<pnpm_reporter::SilentReporter>(
+        &package_key,
+        &metadata,
+        &pnpm_lockfile::SnapshotEntry::default(),
+    )
+    .await
+    .map(drop)
+    .map_err(|error| error.to_string());
+
+    let recorded = fs::read_to_string(&invocations).unwrap_or_default();
+    assert_eq!(
+        recorded.lines().next(),
+        Some("dlx --package yarn@1.22.22 yarn install"),
+        "the host executable should provide the pinned yarn; install outcome: {outcome:?}",
+    );
+}

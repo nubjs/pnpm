@@ -255,6 +255,19 @@ pub struct Embedder {
     /// Node.js installation.
     pub node_execpath: Option<&'static std::path::Path>,
 
+    /// The executable this host answers `dlx --package <spec> <command>`
+    /// with, the way pnpm does.
+    ///
+    /// A git-hosted dependency that pins a package manager, such as
+    /// `packageManager: yarn@1.22.22`, is prepared with that version: the
+    /// engine puts shims on the build's `PATH` that run
+    /// `<executable> dlx --package yarn@1.22.22 yarn`. pnpm supplies none and
+    /// forwards to itself when the running executable is `pnpm`. Under a host
+    /// the running executable is the host's, so without this the dependency
+    /// is prepared with whatever package manager the machine has installed,
+    /// at a version it did not ask for.
+    pub pnpm_execpath: Option<&'static std::path::Path>,
+
     /// An observer notified of every package this run extracts into the
     /// store, for a host that inspects package contents — pnpm registers
     /// none. Supplied as a function rather than as the observer itself so
@@ -331,6 +344,7 @@ impl Embedder {
         overrides_writer: None,
         patched_dependencies_writer: None,
         node_execpath: None,
+        pnpm_execpath: None,
         extract_observer: None,
         materialize_policy: None,
         dlx_exits_like_child: true,

@@ -60,9 +60,10 @@ pub struct PreparePackageOptions<'a> {
     pub script_shell: Option<&'a Path>,
     pub node_execpath: Option<&'a Path>,
     pub npm_execpath: Option<&'a Path>,
-    /// The running pnpm, which the package-manager shims forward to.
-    /// Without it pnpm cannot provide the package manager a dependency
-    /// asks for, and the build falls back to whatever the host has.
+    /// The running pnpm, or the executable an embedding host names in its
+    /// place, which the package-manager shims forward to. Without it pnpm
+    /// cannot provide the package manager a dependency asks for, and the
+    /// build falls back to whatever the host has.
     pub pnpm_execpath: Option<&'a Path>,
     pub extra_bin_paths: &'a [PathBuf],
     pub extra_env: &'a HashMap<String, String>,
@@ -261,9 +262,10 @@ fn provide_wanted_pm<Reporter: self::Reporter>(
         if wanted_pm.pinned {
             // Without the running pnpm there is nothing to forward a shim
             // to, which is the case where pnpm is embedded rather than run
-            // as a command. The host's package manager prepares the
-            // package instead, so the dependency is built by a version it
-            // did not ask for and the user hears about it.
+            // as a command and the host names no executable of its own.
+            // The host's package manager prepares the package instead, so
+            // the dependency is built by a version it did not ask for and
+            // the user hears about it.
             Reporter::emit(&LogEvent::Pnpm(PnpmLog {
                 level: LogLevel::Warn,
                 message: format!(
