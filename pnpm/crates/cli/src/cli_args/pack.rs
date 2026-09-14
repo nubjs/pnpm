@@ -297,6 +297,7 @@ impl PackArgs {
             extra_bin_paths: config.extra_bin_paths.clone(),
             extra_env: config.extra_env.clone(),
             workspace_dir: config.workspace_dir.clone(),
+            node_execpath: config.embedder.node_execpath.map(std::path::Path::to_path_buf),
             dry_run: self.dry_run,
             out,
             pack_destination,

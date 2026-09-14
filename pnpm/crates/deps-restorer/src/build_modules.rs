@@ -235,6 +235,11 @@ pub struct BuildModules<'a> {
     /// [`RunPostinstallHooks::scripts_prepend_node_path`] for each
     /// spawned lifecycle script. Default [`ScriptsPrependNodePath::Never`].
     pub scripts_prepend_node_path: ScriptsPrependNodePath,
+    /// Mirrors `config.embedder.node_execpath`. Threaded through to
+    /// [`RunPostinstallHooks::node_execpath`], so a build script is told the
+    /// Node.js executable the host runs it under. `None` looks `node` up on
+    /// `PATH`.
+    pub node_execpath: Option<&'a Path>,
     /// Mirrors `config.script_shell`. Threaded through to
     /// [`RunPostinstallHooks::script_shell`], so a workspace that
     /// configures a shell gets it for build scripts too, not only for
@@ -443,6 +448,7 @@ impl BuildModules<'_> {
             extra_env: self.extra_env,
             user_agent: self.user_agent,
             scripts_prepend_node_path: self.scripts_prepend_node_path,
+            node_execpath: self.node_execpath,
             script_shell: self.script_shell,
             shell_emulator: self.shell_emulator,
             unsafe_perm: self.unsafe_perm,

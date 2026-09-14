@@ -90,6 +90,9 @@ pub struct PackOptions {
     /// Workspace root, used to inject a root `LICENSE` into a
     /// sub-package tarball that lacks one.
     pub workspace_dir: Option<PathBuf>,
+    /// The Node.js executable the pack lifecycle scripts are told they run
+    /// under. `None` looks `node` up on `PATH`, as pnpm does.
+    pub node_execpath: Option<PathBuf>,
     /// Loaded pnpmfiles whose `beforePacking` hook runs against the
     /// published manifest before the file list is computed, in
     /// application order (config-dependency plugin pnpmfiles first, then
@@ -683,7 +686,7 @@ fn run_scripts_if_present<Reporter: self::Reporter>(
         init_cwd: &opts.dir,
         extra_bin_paths: &opts.extra_bin_paths,
         extra_env: &opts.extra_env,
-        node_execpath: None,
+        node_execpath: opts.node_execpath.as_deref(),
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: Some(&opts.user_agent),

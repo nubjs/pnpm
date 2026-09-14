@@ -473,6 +473,8 @@ fn build_modules_collects_ignored_builds() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -536,6 +538,7 @@ fn mutated_slots_is_false_when_every_build_is_ignored() {
         store_index_writer: None,
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+        node_execpath: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -599,6 +602,7 @@ fn mutated_slots_is_true_when_a_script_runs() {
         store_index_writer: None,
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+        node_execpath: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -617,6 +621,75 @@ fn mutated_slots_is_true_when_a_script_runs() {
     .run::<SilentReporter>()
     .expect("run BuildModules");
     assert!(output.mutated_slots, "an executed script must report a slot mutation");
+}
+
+/// A build script is told the Node.js executable the host supplies, as both
+/// `NODE` and `npm_node_execpath`, instead of the first `node` on `PATH`. The
+/// engine only records the path, so the fixture's need not exist.
+#[test]
+fn a_build_script_is_told_the_node_the_host_supplies() {
+    let snapshots = HashMap::from([(key("zzz", "1.0.0"), SnapshotEntry::default())]);
+    let importers = root_importers(&[("zzz", "1.0.0")]);
+    let policy = policy_from_specs([("zzz", true)], false);
+
+    let virtual_store_dir = tempdir().expect("create temp dir");
+    let modules_dir = tempdir().expect("create temp dir");
+    let lockfile_dir = tempdir().expect("create temp dir");
+    let host_node = lockfile_dir.path().join("host-runtime").join("node");
+    let pkg_dir = create_buildable_pkg(virtual_store_dir.path(), &key("zzz", "1.0.0"));
+    let record_env = "node -e \"require('fs').writeFileSync('node-env', \
+                      process.env.NODE + '|' + process.env.npm_node_execpath)\"";
+    fs::write(
+        pkg_dir.join("package.json"),
+        serde_json::json!({ "scripts": { "postinstall": record_env } }).to_string(),
+    )
+    .expect("write manifest");
+
+    BuildModules {
+        layout: &VirtualStoreLayout::legacy(
+            virtual_store_dir.path(),
+            pnpm_config::default_virtual_store_dir_max_length() as usize,
+        ),
+        modules_dir: modules_dir.path(),
+        lockfile_dir: lockfile_dir.path(),
+        snapshots: Some(&snapshots),
+        importers: &importers,
+        packages: None,
+        allow_build_policy: &policy,
+        side_effects_maps_by_snapshot: None,
+        requires_build_by_snapshot: None,
+        engine_name: None,
+        side_effects_cache: false,
+        side_effects_cache_write: false,
+        shared_side_effects_publisher: None,
+        store_dir: None,
+        store_index_writer: None,
+        patches: None,
+        scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+        node_execpath: Some(&host_node),
+        script_shell: None,
+        shell_emulator: false,
+        extra_env: &HashMap::new(),
+        user_agent: "pnpm/test",
+        unsafe_perm: true,
+        child_concurrency: 1,
+        skipped: &SkippedSnapshots::default(),
+        pkg_roots_by_key: None,
+        gather_ancestor_bin_paths: false,
+        frozen_store: false,
+        ignore_scripts: false,
+        import_method: PackageImportMethod::Auto,
+        logged_methods: &TEST_LOGGED_METHODS,
+        rebuild: None,
+    }
+    .run::<SilentReporter>()
+    .expect("run BuildModules");
+
+    let host_node = host_node.to_string_lossy();
+    assert_eq!(
+        fs::read_to_string(pkg_dir.join("node-env")).expect("the script recorded its env"),
+        format!("{host_node}|{host_node}")
+    );
 }
 
 /// Under `ignore_scripts`, the same default-deny build candidates that
@@ -662,6 +735,8 @@ fn ignore_scripts_skips_build_without_collecting_ignored() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -722,6 +797,8 @@ fn cached_requires_build_false_skips_package_dir_probe() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -798,6 +875,8 @@ fn build_modules_collects_ignored_builds_under_concurrency() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -869,6 +948,8 @@ fn build_modules_excludes_explicit_deny_from_ignored() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -958,6 +1039,8 @@ fn do_not_fail_on_optional_dep_with_failing_postinstall() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1126,6 +1209,8 @@ fn using_side_effects_cache_skips_rebuild() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -1258,6 +1343,8 @@ fn corrupt_side_effects_cache_falls_back_to_rebuild() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -1381,6 +1468,8 @@ fn materialization_failure_on_incomplete_slot_is_fatal() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -1453,6 +1542,8 @@ fn side_effects_cache_disabled_bypasses_the_gate() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -1522,6 +1613,8 @@ fn fail_when_failing_postinstall_is_required() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1616,6 +1709,8 @@ fn frozen_backstop_run(
         patches: Some(&patches),
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -1946,6 +2041,8 @@ async fn write_path_populates_side_effects_row() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -2074,6 +2171,8 @@ async fn write_path_disabled_skips_upload() {
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -2171,6 +2270,8 @@ async fn frozen_store_skips_side_effects_upload() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2328,6 +2429,8 @@ async fn upload_error_does_not_interrupt_install() {
         patches: None,
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -2592,6 +2695,8 @@ new file mode 100644
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -2710,6 +2815,8 @@ new file mode 100644
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
 
+        node_execpath: None,
+
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),
@@ -2799,6 +2906,8 @@ async fn missing_patch_file_path_errors_with_diagnostic() {
         patches: Some(&patches),
 
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+
+        node_execpath: None,
 
         script_shell: None,
         shell_emulator: false,
@@ -3067,6 +3176,7 @@ fn rebuild_selection_runs_only_selected_scripts() {
         store_index_writer: None,
         patches: None,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+        node_execpath: None,
         script_shell: None,
         shell_emulator: false,
         extra_env: &HashMap::new(),

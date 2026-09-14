@@ -276,6 +276,7 @@ fn build_modules<'a>(
         store_index_writer: Some(inputs.store_index_writer),
         patches,
         scripts_prepend_node_path: crate::build_modules::exec_scripts_prepend_node_path(config),
+        node_execpath: config.embedder.node_execpath,
         script_shell: config.script_shell.as_deref().map(Path::new),
         shell_emulator: config.shell_emulator,
         extra_env: inputs.extra_env,

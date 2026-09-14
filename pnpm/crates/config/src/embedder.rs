@@ -221,6 +221,17 @@ pub struct Embedder {
     /// the time the writer returns.
     pub patched_dependencies_writer: Option<PatchedDependenciesWriter>,
 
+    /// The Node.js executable this host runs scripts under.
+    ///
+    /// The engine records it as `NODE` and `npm_node_execpath` for every
+    /// lifecycle and package script it spawns, and `scriptsPrependNodePath`
+    /// puts its directory on the script's `PATH`. pnpm supplies none and
+    /// records the first `node` on `PATH` instead. A host that fronts `PATH`
+    /// with a directory of its own, such as a shim that re-enters the host,
+    /// would otherwise have that shim recorded where a script expects a
+    /// Node.js installation.
+    pub node_execpath: Option<&'static std::path::Path>,
+
     /// An observer notified of every package this run extracts into the
     /// store, for a host that inspects package contents — pnpm registers
     /// none. Supplied as a function rather than as the observer itself so
@@ -294,6 +305,7 @@ impl Embedder {
         allow_builds_writer: None,
         overrides_writer: None,
         patched_dependencies_writer: None,
+        node_execpath: None,
         extract_observer: None,
         materialize_policy: None,
         dlx_exits_like_child: true,

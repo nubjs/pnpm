@@ -10811,3 +10811,37 @@ fn the_purge_diagnostics_render_copy_pasteable_windows_paths() {
         assert!(!rendered.contains(r"\\"), "separators must not be escaped: {rendered}");
     }
 }
+
+/// A project's own lifecycle script is told the Node.js executable the host
+/// supplies, read from the configuration's profile, as a dependency's build
+/// script is. The engine only records the path, so the fixture's need not
+/// exist.
+#[test]
+fn a_project_lifecycle_script_is_told_the_node_the_host_supplies() {
+    let dir = tempdir().expect("create temp dir");
+    let host_node: &'static Path =
+        Box::leak(dir.path().join("host-runtime").join("node").into_boxed_path());
+    let record_env = "node -e \"require('fs').writeFileSync('node-env', \
+                      process.env.NODE + '|' + process.env.npm_node_execpath)\"";
+    fs::write(
+        dir.path().join("package.json"),
+        serde_json::json!({ "scripts": { "pnpm:devPreinstall": record_env } }).to_string(),
+    )
+    .expect("write manifest");
+    let config = Config {
+        embedder: pnpm_config::Embedder {
+            node_execpath: Some(host_node),
+            ..pnpm_config::Embedder::PNPM
+        },
+        ..Config::default()
+    };
+
+    super::run_dev_preinstall::<SilentReporter>(&config, dir.path())
+        .expect("run the devPreinstall hook");
+
+    let host_node = host_node.to_string_lossy();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("node-env")).expect("the script recorded its env"),
+        format!("{host_node}|{host_node}")
+    );
+}

@@ -21,6 +21,7 @@ const NUB: Embedder = Embedder {
     allow_builds_writer: None,
     overrides_writer: None,
     patched_dependencies_writer: None,
+    node_execpath: None,
     extract_observer: None,
     materialize_policy: None,
     settings_file_display_name: "nub.jsonc",
@@ -40,6 +41,7 @@ fn default_profile_keeps_pnpm_naming() {
     assert!(config.embedder.workspace_settings.is_none());
     assert_eq!(config.embedder.compat_package_extensions, None);
     assert!(config.embedder.patched_dependencies_writer.is_none());
+    assert_eq!(config.embedder.node_execpath, None);
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");
     assert_eq!(config.embedder.virtual_store_dirname, ".pnpm");
     // pnpm's dlx IS the last thing the process does, so it becomes its

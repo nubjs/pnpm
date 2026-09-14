@@ -99,6 +99,7 @@ fn pack_options(options: PackOptions) -> pnpm_pack::PackOptions {
             .collect(),
         extra_env: options.extra_env.unwrap_or_default(),
         workspace_dir: options.workspace_dir.map(PathBuf::from),
+        node_execpath: None,
         dry_run: options.dry_run.unwrap_or(false),
         pack_destination: options.pack_destination,
         out: options.out,
