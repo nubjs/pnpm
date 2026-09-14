@@ -80,6 +80,22 @@ pub fn is_reported_error(error: &miette::Report) -> bool {
     })
 }
 
+/// The exit code of a `dlx` child that ran and failed, or `None` when the
+/// error is anything else.
+///
+/// Only reachable under `Embedder::dlx_exits_like_child == false`, where a
+/// failed child is reported rather than becoming this process's exit status.
+/// A host needs the two apart: the tool RAN (and this is its code) is a
+/// different outcome from never having fetched the tool at all, and a host
+/// that records anything about a successful fetch must not record the second.
+#[must_use]
+pub fn dlx_child_exit_code(error: &miette::Report) -> Option<i32> {
+    match error.downcast_ref::<cli_args::dlx::DlxError>() {
+        Some(cli_args::dlx::DlxError::ChildFailed { code, .. }) => Some(*code),
+        _ => None,
+    }
+}
+
 /// Parse and execute the CLI, including shim dispatch and startup fast paths.
 fn run_cli() -> miette::Result<()> {
     let argv: Vec<OsString> = std::env::args_os().collect();

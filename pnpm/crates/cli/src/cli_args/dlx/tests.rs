@@ -343,4 +343,14 @@ fn an_embedder_gets_a_failed_dlx_child_back_instead_of_exiting() {
         matches!(failed, DlxError::ChildFailed { code: 3, .. }),
         "the child's own exit code must survive: {failed:?}"
     );
+
+    // The public accessor is what a host outside this crate actually has —
+    // `cli_args` is private, so the variant above is not reachable there.
+    assert_eq!(crate::dlx_child_exit_code(&err), Some(3));
+    let other: miette::Report = DlxError::NoDep.into();
+    assert_eq!(
+        crate::dlx_child_exit_code(&other),
+        None,
+        "only a child that RAN and failed has an exit code to report"
+    );
 }
