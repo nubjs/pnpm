@@ -198,6 +198,18 @@ pub struct Embedder {
     /// shared virtual store, supplied the same way and for the same
     /// reason. pnpm sets none, and then every package is shared.
     pub materialize_policy: Option<MaterializePolicyProvider>,
+
+    /// Whether a `dlx` child that exits nonzero ends this process the same
+    /// way.
+    ///
+    /// pnpm's own `dlx` is the last thing the process does, so becoming the
+    /// child's exit status (and, on Unix, re-raising its fatal signal) is the
+    /// only faithful way to report it. A host that embeds the engine is not
+    /// finished when the child is: the call has to return so the host can run
+    /// its own epilogue. With this `false`, a failed child surfaces as
+    /// `ERR_PNPM_DLX_CHILD_FAILED` carrying the code instead of exiting, which
+    /// also keeps it distinguishable from a failure to FETCH the tool at all.
+    pub dlx_exits_like_child: bool,
 }
 
 /// Records a set of approve-builds decisions for a host that keeps them
@@ -242,6 +254,7 @@ impl Embedder {
         overrides_writer: None,
         extract_observer: None,
         materialize_policy: None,
+        dlx_exits_like_child: true,
     };
 }
 

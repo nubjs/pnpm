@@ -1,6 +1,6 @@
 use super::{
-    DlxArgs, DlxError, create_cache_key, get_bin_name, get_prepare_dir, get_valid_cache_dir,
-    scopeless,
+    DlxArgs, DlxError, DlxProgram, DlxSpawn, create_cache_key, get_bin_name, get_prepare_dir,
+    get_valid_cache_dir, run_bin, scopeless,
 };
 use clap::Parser;
 use pnpm_package_is_installable::SupportedArchitectures;
@@ -311,4 +311,36 @@ fn only_managed_tools_are_provisioned_by_name() {
     assert!(PackageManager::Npm.bins().contains(&"npx"));
     assert!(PackageManager::Yarn.bins().contains(&"yarnpkg"));
     assert!(!PackageManager::Npm.bins().contains(&"yarn"));
+}
+
+/// A `dlx` child that exits nonzero ends pnpm the same way, so the failure is
+/// reported rather than returned. An embedder's process is not finished when
+/// the child is, and `dlx_exits_like_child: false` is what lets the call come
+/// back — carrying the child's code, and distinguishable from a failure to
+/// FETCH the tool, which is a different variant entirely.
+///
+/// ⛔ There is deliberately no companion arm for the `true` policy: it would
+/// end this test PROCESS by design. The assertion that the call returns at all
+/// is what proves the branch, since the default policy could not reach here.
+#[test]
+fn an_embedder_gets_a_failed_dlx_child_back_instead_of_exiting() {
+    let cwd = tempdir().expect("tempdir");
+    let extra_env = std::collections::HashMap::new();
+    let spawn = DlxSpawn {
+        cwd: cwd.path(),
+        extra_bin_paths: &[],
+        extra_env: &extra_env,
+        user_agent: "nub/0.0.0-test",
+        // Run through a shell so the fixture needs no package on disk.
+        shell_mode: true,
+        exits_like_child: false,
+    };
+
+    let err = run_bin(DlxProgram::Named("exit"), &["3".to_string()], Vec::new(), &spawn)
+        .expect_err("a nonzero child must surface as an error");
+    let failed = err.downcast_ref::<DlxError>().expect("a DlxError");
+    assert!(
+        matches!(failed, DlxError::ChildFailed { code: 3, .. }),
+        "the child's own exit code must survive: {failed:?}"
+    );
 }

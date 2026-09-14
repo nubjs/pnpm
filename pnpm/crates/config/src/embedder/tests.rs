@@ -22,6 +22,7 @@ const NUB: Embedder = Embedder {
     extract_observer: None,
     materialize_policy: None,
     settings_file_display_name: "nub.jsonc",
+    dlx_exits_like_child: false,
 };
 
 #[test]
@@ -37,6 +38,11 @@ fn default_profile_keeps_pnpm_naming() {
     assert_eq!(config.embedder.compat_package_extensions, None);
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");
     assert_eq!(config.embedder.virtual_store_dirname, ".pnpm");
+    // pnpm's dlx IS the last thing the process does, so it becomes its
+    // child's exit status; only an embedder needs the call to return.
+    assert!(config.embedder.dlx_exits_like_child);
+    let embedded = Config { embedder: NUB, ..Config::default() };
+    assert!(!embedded.embedder.dlx_exits_like_child);
 }
 
 #[test]

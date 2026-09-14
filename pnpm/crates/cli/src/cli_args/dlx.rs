@@ -115,6 +115,10 @@ pub enum DlxError {
     #[diagnostic(code(ERR_PNPM_DLX_COMMAND_NOT_FOUND))]
     CommandNotFound { command: String },
 
+    #[display("The command \"{command}\" exited with code {code}")]
+    #[diagnostic(code(ERR_PNPM_DLX_CHILD_FAILED))]
+    ChildFailed { command: String, code: i32 },
+
     #[display(
         "Cannot add {dir} to PATH because it contains the path delimiter character ({delimiter})"
     )]
@@ -400,6 +404,7 @@ struct SpawnEnv {
     extra_bin_paths: Vec<PathBuf>,
     extra_env: HashMap<String, String>,
     user_agent: String,
+    exits_like_child: bool,
 }
 
 impl SpawnEnv {
@@ -419,6 +424,7 @@ impl SpawnEnv {
             extra_bin_paths: config.extra_bin_paths.clone(),
             extra_env,
             user_agent: config.user_agent.clone(),
+            exits_like_child: config.embedder.dlx_exits_like_child,
         }
     }
 
@@ -429,6 +435,7 @@ impl SpawnEnv {
             extra_env: &self.extra_env,
             user_agent: &self.user_agent,
             shell_mode,
+            exits_like_child: self.exits_like_child,
         }
     }
 }
@@ -474,6 +481,7 @@ struct DlxSpawn<'a> {
     extra_env: &'a HashMap<String, String>,
     user_agent: &'a str,
     shell_mode: bool,
+    exits_like_child: bool,
 }
 
 /// What dlx runs.
@@ -561,7 +569,17 @@ fn run_bin(
         .and_then(|mut child| child.wait())
         .map_err(|source| DlxError::Spawn { command: program.command().to_string(), source })?;
     if !status.success() {
-        pnpm_executor::exit_like(pnpm_executor::ScriptExit::Process(status));
+        if spawn.exits_like_child {
+            pnpm_executor::exit_like(pnpm_executor::ScriptExit::Process(status));
+        }
+        // An embedder's process is not finished when the child is, so report
+        // the failure instead of becoming it. The code is the child's; a
+        // signal death has none, and 1 is what `exit_like` would have used.
+        return Err(DlxError::ChildFailed {
+            command: program.command().to_string(),
+            code: status.code().unwrap_or(1),
+        }
+        .into());
     }
     Ok(())
 }
