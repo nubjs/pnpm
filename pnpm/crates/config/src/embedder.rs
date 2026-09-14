@@ -109,6 +109,18 @@ pub struct Embedder {
     /// Defaults to `allowBuilds`, so standalone pnpm's wording is unchanged.
     pub allow_builds_display_name: &'static str,
 
+    /// Hidden entries this host writes into a modules directory beside
+    /// pnpm's own, which `clean` removes along with them.
+    ///
+    /// `clean` leaves every other dot-entry in `node_modules` alone — a
+    /// tool's `.cache` is not the package manager's to delete — so a file the
+    /// host keeps there, such as a stamp recording what built the tree, would
+    /// outlive the tree it describes. The engine cannot know such a name, so
+    /// the host lists it.
+    ///
+    /// Empty for pnpm.
+    pub hidden_modules_dir_entries: &'static [&'static str],
+
     /// Whether the engine reads the configuration only pnpm defines: the
     /// `pnpm-workspace.yaml` search, the global `config.yaml` and `auth.ini`,
     /// `pnpm_config_*` / `PNPM_CONFIG_*` environment variables, and the
@@ -309,6 +321,7 @@ impl Embedder {
         virtual_store_dirname: ".pnpm",
         settings_file_display_name: "pnpm-workspace.yaml",
         allow_builds_display_name: "allowBuilds",
+        hidden_modules_dir_entries: &[],
         reads_pnpm_config: true,
         reads_npm_config_env: false,
         writes_settings_file: true,

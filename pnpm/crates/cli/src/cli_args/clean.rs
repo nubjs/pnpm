@@ -37,11 +37,11 @@ struct ScriptOverrideInWorkspaceRoot {
     command: String,
 }
 
-/// The pnpm hidden entries inside `node_modules` that `clean` removes
-/// alongside the regular package directories. Any other dotfile (e.g.
-/// `.cache`) is left in place.
-const PNPM_HIDDEN_ENTRIES: &[&str] =
-    &[".bin", ".modules.yaml", ".pnpm", ".pnpm-workspace-state-v1.json"];
+/// The hidden entries inside `node_modules` that `clean` removes alongside
+/// the regular package directories, besides the profile's virtual store
+/// directory and the entries a host lists (see [`is_pnpm_entry`]). Any other
+/// dotfile (e.g. `.cache`) is left in place.
+const PNPM_HIDDEN_ENTRIES: &[&str] = &[".bin", ".modules.yaml", ".pnpm-workspace-state-v1.json"];
 
 impl CleanArgs {
     pub(super) fn run(self, ctx: &RunCtx<'_>, command_name: &str) -> miette::Result<()> {
@@ -129,25 +129,40 @@ fn clean_builtin(ctx: &RunCtx<'_>, config: &Config, remove_lockfile: bool) -> mi
     };
     for dir in &dirs {
         let full_modules_dir = dir.join(modules_leaf);
-        if has_contents_to_remove(&full_modules_dir) {
+        if has_contents_to_remove(&full_modules_dir, &config.embedder) {
             print_removing(&cwd, &full_modules_dir);
-            remove_modules_dir_contents(&full_modules_dir)?;
+            remove_modules_dir_contents(&full_modules_dir, &config.embedder)?;
         }
     }
     if remove_lockfile {
-        remove_workspace_lockfile(&cwd, root_dir)?;
+        remove_workspace_lockfiles(&cwd, root_dir, config.embedder)?;
     }
     remove_external_virtual_store(&cwd, config, root_dir, modules_leaf)
 }
 
-fn remove_workspace_lockfile(cwd: &Path, root_dir: &Path) -> miette::Result<()> {
-    let lockfile_path = root_dir.join("pnpm-lock.yaml");
+/// The lockfile the running program writes, and any it still reads under a
+/// name it has retired: left behind, the retired one is what the next install
+/// would resolve from, which is exactly what `--lockfile` asks to prevent.
+fn remove_workspace_lockfiles(
+    cwd: &Path,
+    root_dir: &Path,
+    embedder: pnpm_config::Embedder,
+) -> miette::Result<()> {
+    let names = std::iter::once(embedder.lockfile_basename)
+        .chain(embedder.lockfile_legacy_basenames.iter().copied());
+    for name in names {
+        remove_workspace_lockfile(cwd, &root_dir.join(name))?;
+    }
+    Ok(())
+}
+
+fn remove_workspace_lockfile(cwd: &Path, lockfile_path: &Path) -> miette::Result<()> {
     if !lockfile_path.exists() {
         return Ok(());
     }
-    print_removing(cwd, &lockfile_path);
+    print_removing(cwd, lockfile_path);
     // A concurrent remover is not an error: the file is gone either way.
-    std::fs::remove_file(&lockfile_path)
+    std::fs::remove_file(lockfile_path)
         .or_else(
             |error| {
                 if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error) }
@@ -158,9 +173,8 @@ fn remove_workspace_lockfile(cwd: &Path, root_dir: &Path) -> miette::Result<()> 
 }
 
 /// A virtual store dir configured outside `node_modules` (e.g. a custom
-/// `virtual-store-dir`) is removed separately; the default
-/// `node_modules/.pnpm` is cleaned along with the modules dir's
-/// contents.
+/// `virtual-store-dir`) is removed separately; the default one inside
+/// `node_modules` is cleaned along with the modules dir's contents.
 fn remove_external_virtual_store(
     cwd: &Path,
     config: &Config,
@@ -186,19 +200,24 @@ fn remove_external_virtual_store(
 /// Whether `modules_dir` holds anything `clean` removes: a regular
 /// package directory or one of the pnpm hidden entries. Other dotfiles
 /// (e.g. `.cache`) mean "nothing to clean" on their own.
-fn has_contents_to_remove(modules_dir: &Path) -> bool {
+fn has_contents_to_remove(modules_dir: &Path, embedder: &pnpm_config::Embedder) -> bool {
     let Ok(entries) = std::fs::read_dir(modules_dir) else {
         return false;
     };
-    entries.filter_map(Result::ok).any(|entry| is_pnpm_entry(&entry.file_name().to_string_lossy()))
+    entries
+        .filter_map(Result::ok)
+        .any(|entry| is_pnpm_entry(&entry.file_name().to_string_lossy(), embedder))
 }
 
-fn remove_modules_dir_contents(modules_dir: &Path) -> miette::Result<()> {
+fn remove_modules_dir_contents(
+    modules_dir: &Path,
+    embedder: &pnpm_config::Embedder,
+) -> miette::Result<()> {
     let Ok(entries) = std::fs::read_dir(modules_dir) else {
         return Ok(());
     };
     for entry in entries.filter_map(Result::ok) {
-        if !is_pnpm_entry(&entry.file_name().to_string_lossy()) {
+        if !is_pnpm_entry(&entry.file_name().to_string_lossy(), embedder) {
             continue;
         }
         remove_path(&entry.path())?;
@@ -217,8 +236,14 @@ fn remove_path(path: &Path) -> miette::Result<()> {
         .wrap_err_with(|| format!("removing {}", path.display()))
 }
 
-fn is_pnpm_entry(name: &str) -> bool {
-    !name.starts_with('.') || PNPM_HIDDEN_ENTRIES.contains(&name)
+/// The virtual store is the profile's `virtual_store_dirname` rather than a
+/// fixed `.pnpm`, and a host's own hidden entries go with it: left behind,
+/// either one keeps `node_modules` from being emptied.
+fn is_pnpm_entry(name: &str, embedder: &pnpm_config::Embedder) -> bool {
+    !name.starts_with('.')
+        || PNPM_HIDDEN_ENTRIES.contains(&name)
+        || name == embedder.virtual_store_dirname
+        || embedder.hidden_modules_dir_entries.contains(&name)
 }
 
 /// Print `Removing <path>`, with `path` rendered relative to `base` (the
@@ -230,3 +255,6 @@ fn print_removing(base: &Path, path: &Path) {
         if relative.as_os_str().is_empty() { PathBuf::from(".") } else { relative };
     println!("Removing {}", owned.display());
 }
+
+#[cfg(test)]
+mod tests;
