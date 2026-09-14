@@ -103,10 +103,23 @@ pub struct Embedder {
     /// default `.pnpmfile.cjs` / `.pnpmfile.mjs`.
     ///
     /// A host with a configuration file of its own turns this off and passes
-    /// what it resolved as [`Self::workspace_settings`]. The sources pnpm
-    /// shares with npm — the `.npmrc` chain and `npm_config_*` — are read
-    /// either way, as are command-line options.
+    /// what it resolved as [`Self::workspace_settings`]. The `.npmrc` chain is
+    /// read either way, as are command-line options; which `npm_config_*`
+    /// variables apply is [`Self::reads_npm_config_env`]'s to decide.
     pub reads_pnpm_config: bool,
+
+    /// Whether `npm_config_*` / `NPM_CONFIG_*` environment variables set the
+    /// keys an `.npmrc` routes, proxies and secures requests with: `registry`,
+    /// `@scope:registry`, the proxy keys, and `ca`, `cafile`, `cert`, `key`,
+    /// `strict-ssl` and `local-address`.
+    ///
+    /// npm reads them above every `.npmrc` and pnpm reads none of them, so
+    /// this is off for pnpm. A host whose users configure requests the npm
+    /// way, such as a CI job exporting `npm_config_registry` or
+    /// `NPM_CONFIG_STRICT_SSL`, turns it on, and the variables then rank above
+    /// the project `.npmrc`. Credentials are not among them: the URL-scoped
+    /// credential variables are read under either profile.
+    pub reads_npm_config_env: bool,
 
     /// Whether the engine may EDIT pnpm's settings file — the write-side twin
     /// of [`Self::reads_pnpm_config`].
@@ -247,6 +260,7 @@ impl Embedder {
         virtual_store_dirname: ".pnpm",
         settings_file_display_name: "pnpm-workspace.yaml",
         reads_pnpm_config: true,
+        reads_npm_config_env: false,
         writes_settings_file: true,
         workspace_settings: None,
         compat_package_extensions: None,

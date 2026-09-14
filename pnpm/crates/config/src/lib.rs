@@ -4095,12 +4095,17 @@ impl Config {
         let env_scoped_source = env_scoped_auth_source::<Sys>(reads_pnpm_config);
         let env_json_source =
             if reads_pnpm_config { env_json_auth_source::<Sys>(global_settings)? } else { None };
+        let env_npm_config_source = self.embedder.reads_npm_config_env.then(|| {
+            let cwd = Sys::current_dir().unwrap_or_else(|_| start_dir.to_path_buf());
+            NpmrcAuth::from_npm_config_env::<Sys>(&cwd)
+        });
 
         // Capture the trusted sources (everything but `project_source`) for
         // [`PackageManagerBootstrap`] before the fold below consumes them.
         let trusted_sources = [
             env_json_source.clone(),
             env_scoped_source.clone(),
+            env_npm_config_source.clone(),
             auth_ini_source.clone(),
             user_source.clone(),
         ];
@@ -4112,6 +4117,7 @@ impl Config {
         let mut npmrc_auth = merge_auth_sources([
             env_json_source,
             env_scoped_source,
+            env_npm_config_source,
             project_source,
             auth_ini_source,
             user_source,

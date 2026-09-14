@@ -14,6 +14,7 @@ const NUB: Embedder = Embedder {
     lockfile_legacy_basenames: &["lock.yaml"],
     virtual_store_dirname: ".store",
     reads_pnpm_config: false,
+    reads_npm_config_env: true,
     writes_settings_file: false,
     workspace_settings: None,
     compat_package_extensions: None,
@@ -34,6 +35,7 @@ fn default_profile_keeps_pnpm_naming() {
     assert!(config.embedder.manage_runtimes);
     assert!(!config.embedder.workspaces_from_package_manifest);
     assert!(config.embedder.reads_pnpm_config);
+    assert!(!config.embedder.reads_npm_config_env);
     assert!(config.embedder.workspace_settings.is_none());
     assert_eq!(config.embedder.compat_package_extensions, None);
     assert_eq!(config.wanted_lockfile_name(), "pnpm-lock.yaml");

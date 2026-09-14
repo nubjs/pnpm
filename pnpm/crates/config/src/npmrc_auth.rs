@@ -227,6 +227,38 @@ impl NpmrcAuth {
         auth
     }
 
+    /// The `.npmrc` keys `npm_config_*` / `NPM_CONFIG_*` environment variables
+    /// set, for a profile that
+    /// [reads them](crate::Embedder::reads_npm_config_env).
+    ///
+    /// Only `registry`, `@scope:registry` and the proxy and TLS keys are taken.
+    /// Credentials are not, since an unscoped one here would travel to
+    /// whichever registry the merged configuration names. Values are used
+    /// verbatim, a relative `cafile` resolves against `cwd`, and where two
+    /// variables name one key the lower-case spelling wins, as it does for
+    /// `npm_config_userconfig`.
+    pub fn from_npm_config_env<Sys: EnvVar>(cwd: &Path) -> Self {
+        let mut vars = Sys::vars();
+        // Upper case sorts first, so a lower-case spelling is applied last.
+        vars.sort();
+        let mut auth = NpmrcAuth::default();
+        for (name, value) in vars.into_iter().filter(|(_, value)| !value.is_empty()) {
+            let Some(key) = npm_config_env_key(&name) else {
+                continue;
+            };
+            let taken = if key == "registry" || scoped_registry_key(&key).is_some() {
+                auth.apply_ini_entry(&key, value.clone(), cwd);
+                true
+            } else {
+                auth.apply_network_key(&key, &value, cwd)
+            };
+            if taken && crate::config_types::is_ini_config_key(&key) {
+                auth.raw_ini_config.insert(key, value);
+            }
+        }
+        auth
+    }
+
     /// Parse the structured `_auth` setting from its two trusted, non-repo
     /// sources — the global pnpm `config.yaml` (`global_value`) and the
     /// `pnpm_config__auth` env var — global-first then env, so the env var
@@ -1091,6 +1123,24 @@ fn is_request_destination_value_key(key: &str) -> bool {
 
 fn is_registry_key(key: &str) -> bool {
     key == "registry" || (key.starts_with('@') && key.ends_with(":registry"))
+}
+
+/// The `.npmrc` key an `npm_config_*` / `NPM_CONFIG_*` variable names, spelled
+/// as npm spells it: every `_` after the first character becomes `-`, and the
+/// rest is lower-cased. A URL-scoped name names none, since
+/// [`NpmrcAuth::from_url_scoped_env`] reads those.
+fn npm_config_env_key(name: &str) -> Option<String> {
+    const PREFIX: &str = "npm_config_";
+    let suffix = name
+        .get(..PREFIX.len())
+        .filter(|head| head.eq_ignore_ascii_case(PREFIX))
+        .map(|_| &name[PREFIX.len()..])
+        .filter(|suffix| !suffix.is_empty() && !suffix.starts_with("//"))?;
+    let key = suffix
+        .char_indices()
+        .map(|(index, ch)| if index > 0 && ch == '_' { '-' } else { ch.to_ascii_lowercase() })
+        .collect();
+    Some(key)
 }
 
 fn scoped_registry_key(key: &str) -> Option<&str> {

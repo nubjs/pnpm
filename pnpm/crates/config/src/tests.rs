@@ -410,6 +410,48 @@ pub fn a_profile_that_reads_no_pnpm_config_skips_pnpm_env_and_global_config() {
     assert_eq!(host.registry, "https://npm-spelling.example/");
 }
 
+/// A profile that reads npm's environment takes the registry, a scoped
+/// registry, and the proxy and TLS keys from `npm_config_*` over the project
+/// `.npmrc`, in either case, and no credential. pnpm's own profile on the same
+/// environment is the control that reads none of it.
+#[test]
+pub fn a_profile_that_reads_npm_config_env_ranks_it_above_the_project_npmrc() {
+    fake_env!();
+    let project = tempdir().expect("project tempdir");
+    fs::write(
+        project.path().join(".npmrc"),
+        "registry=https://npmrc.example/\nstrict-ssl=true\nhttps-proxy=http://npmrc-proxy.example/\n",
+    )
+    .expect("write npmrc");
+    set_fake_env(&[
+        ("NPM_CONFIG_REGISTRY", "https://upper-case.example/"),
+        ("npm_config_registry", "https://env.example/"),
+        ("NPM_CONFIG_STRICT_SSL", "false"),
+        ("npm_config_https_proxy", "http://env-proxy.example/"),
+        ("npm_config_@MyOrg:registry", "https://scoped.example/"),
+        ("npm_config__authToken", "env-token"),
+    ]);
+
+    let pnpm = Config::default().current::<FakeEnv>(project.path()).expect("load config");
+    assert_eq!(pnpm.registry, "https://npmrc.example/");
+    assert_eq!(pnpm.tls.strict_ssl, Some(true));
+    assert_eq!(pnpm.proxy.https_proxy.as_deref(), Some("http://npmrc-proxy.example/"));
+    assert_eq!(pnpm.registries_by_scope.get("@myorg"), None);
+
+    let embedder = crate::Embedder { reads_npm_config_env: true, ..crate::Embedder::PNPM };
+    let host = Config { embedder, ..Config::default() }
+        .current::<FakeEnv>(project.path())
+        .expect("load config");
+    assert_eq!(host.registry, "https://env.example/");
+    assert_eq!(host.tls.strict_ssl, Some(false));
+    assert_eq!(host.proxy.https_proxy.as_deref(), Some("http://env-proxy.example/"));
+    assert_eq!(
+        host.registries_by_scope.get("@myorg").map(String::as_str),
+        Some("https://scoped.example/"),
+    );
+    assert_eq!(host.auth_headers.for_url("https://env.example/"), None);
+}
+
 #[test]
 pub fn global_dirs_use_only_trusted_config_sources() {
     fake_env!(load_with_fake_env);
