@@ -172,6 +172,21 @@ pub struct Embedder {
     /// nothing scaffolds the engine's own manifest.
     pub allow_builds_writer: Option<AllowBuildsWriter>,
 
+    /// Where an override `link` records lives for this host, the write-side
+    /// twin of the same problem `allow_builds_writer` solves. A link is only
+    /// a link because an override points the dependency at the local
+    /// directory, and pnpm keeps that override in its workspace manifest. A
+    /// host that reads no such file has nowhere the next install would read
+    /// the override back from, so `link` refuses rather than leave the
+    /// dependency resolving to the registry copy.
+    ///
+    /// Supplying one gives the host that place: it is handed the directory
+    /// the overrides belong to and each selector with the specifier to
+    /// record, and merges them into whatever it already had. Hosts whose
+    /// overrides come from a file they DO read — `package.json`'s neutral
+    /// `overrides`, say — want this rather than the refusal.
+    pub overrides_writer: Option<OverridesWriter>,
+
     /// An observer notified of every package this run extracts into the
     /// store, for a host that inspects package contents — pnpm registers
     /// none. Supplied as a function rather than as the observer itself so
@@ -189,6 +204,10 @@ pub struct Embedder {
 /// outside pnpm's workspace manifest. See
 /// [`Embedder::allow_builds_writer`].
 pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::Result<()>;
+
+/// Records a set of overrides for a host that keeps them outside pnpm's
+/// workspace manifest. See [`Embedder::overrides_writer`].
+pub type OverridesWriter = fn(&std::path::Path, &[(&str, &str)]) -> std::io::Result<()>;
 
 /// Supplies the observer a host wants notified of each extraction. See
 /// [`Embedder::extract_observer`].
@@ -220,6 +239,7 @@ impl Embedder {
         workspace_settings: None,
         compat_package_extensions: None,
         allow_builds_writer: None,
+        overrides_writer: None,
         extract_observer: None,
         materialize_policy: None,
     };

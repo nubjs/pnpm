@@ -18,6 +18,7 @@ const NUB: Embedder = Embedder {
     workspace_settings: None,
     compat_package_extensions: None,
     allow_builds_writer: None,
+    overrides_writer: None,
     extract_observer: None,
     materialize_policy: None,
     settings_file_display_name: "nub.jsonc",
