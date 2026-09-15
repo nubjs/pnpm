@@ -740,8 +740,9 @@ impl<'a> CreateVirtualStore<'a> {
     ///
     /// Deliberately NOT conditioned on this run having a cold batch. A
     /// snapshot is classified warm on the presence of its store-index row
-    /// alone ([`partition::Partitioner::warm_entry`]) and not on its slot
-    /// existing, and that row can become readable in the gap between the
+    /// alone -- `partition`'s warm entry asks the prefetch for the row's CAS
+    /// paths and nothing else -- and not on its slot existing, and that row
+    /// can become readable in the gap between the
     /// plan-time policy call and the prefetch's index read. A package this
     /// install is about to place for the FIRST time then arrives here warm,
     /// with no slot on disk and a plan-time answer taken before its content

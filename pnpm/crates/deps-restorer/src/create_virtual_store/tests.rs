@@ -1332,3 +1332,202 @@ async fn a_cold_package_is_placed_by_the_answer_taken_after_the_fetch() {
         "nothing may have been placed in the shared store: {global_virtual_store_dir:?}",
     );
 }
+
+/// A package the store already has a row for, but which THIS project has no
+/// slot for, is still placed by the answer taken after the fetch.
+///
+/// The regression this guards is the reason the re-consultation is not gated
+/// on a cold batch. A snapshot is classified warm on the presence of its
+/// store-index row alone, not on its slot existing, so the resolve-time
+/// prefetcher extracting a package and the batched index writer flushing its
+/// row — both of which can happen before the prefetch reads the index — are
+/// enough to make it warm on the very install that first places it here.
+/// With the gate on \`partition.cold\`, that install took the plan-time
+/// answer, which for a policy deciding by what a package CONTAINS is
+/// "shared" because at plan time there was nothing to read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_warm_package_with_no_slot_is_placed_by_the_second_answer() {
+    use crate::{AllowBuildPolicy, SkippedSnapshots, VirtualStoreLayout};
+    use pnpm_config::{Config, NodeLinker, PackageImportMethod};
+    use pnpm_store_dir::StoreIndexWriter;
+    use pnpm_tarball::{CacheValue, MemCache, SharedReportedProgressKeys};
+
+    let root = tempfile::tempdir().expect("create temp dir");
+    let store_dir = root.path().join("store");
+    let global_virtual_store_dir = store_dir.join("links");
+    let package_key = key("warm-eject", "1.0.0");
+    let snapshots = HashMap::from([(package_key.clone(), SnapshotEntry::default())]);
+    let packages =
+        HashMap::from([(package_key.without_peer(), metadata_with_integrity(DUMMY_SHA512))]);
+
+    // The tarball both installs fetch from, so neither needs a network.
+    let source_dir = root.path().join("prefetched").join("warm-eject");
+    fs::create_dir_all(&source_dir).expect("create prefetched package dir");
+    let manifest_path = source_dir.join("package.json");
+    fs::write(&manifest_path, r#"{"name":"warm-eject","version":"1.0.0"}"#)
+        .expect("write package manifest");
+    let mem_cache = Arc::new(MemCache::default());
+    mem_cache.insert(
+        "https://registry.test/warm-eject/-/warm-eject-1.0.0.tgz".to_string(),
+        Arc::new(tokio::sync::RwLock::new(CacheValue::Available(Arc::new(HashMap::from([(
+            "package.json".to_string(),
+            manifest_path,
+        )]))))),
+    );
+
+    let allow_build_policy = AllowBuildPolicy::default();
+    let logged_methods = AtomicU8::new(0);
+    let progress_reported = SharedReportedProgressKeys::default();
+
+    let build = |workspace: &std::path::Path, policy: Option<Arc<KeepsOnSecondAnswer>>| {
+        let modules_dir = workspace.join("node_modules");
+        let virtual_store_dir = modules_dir.join(".pnpm");
+        let mut config = Config::new();
+        config.registry = "https://registry.test".to_string();
+        config.store_dir = store_dir.clone().into();
+        config.modules_dir = modules_dir;
+        config.virtual_store_dir = virtual_store_dir.clone();
+        config.global_virtual_store_dir = global_virtual_store_dir.clone();
+        config.enable_global_virtual_store = true;
+        config.package_import_method = PackageImportMethod::Copy;
+        config.offline = true;
+        if let Some(policy) = policy {
+            config.materialize_policy = Some(policy as Arc<dyn pnpm_store_dir::MaterializePolicy>);
+        }
+        (config.leak(), virtual_store_dir)
+    };
+
+    // FIRST INSTALL, no policy: puts the package in the shared store and
+    // writes the store-index row that makes it warm for everyone after.
+    let seed_root = root.path().join("seed");
+    fs::create_dir_all(&seed_root).expect("create seed workspace");
+    let (seed_config, _) = build(&seed_root, None);
+    let seed_layout = VirtualStoreLayout::new(
+        seed_config,
+        None,
+        Some(&snapshots),
+        Some(&packages),
+        Some(&allow_build_policy),
+        None,
+        None,
+    );
+    let seed_skipped = SkippedSnapshots::new();
+    let (seed_writer, seed_task) = StoreIndexWriter::spawn(&seed_config.store_dir);
+    let seed_requester = seed_root.to_string_lossy().into_owned();
+    CreateVirtualStore {
+        ctx: &crate::InstallContext {
+            config: seed_config,
+            workspace_root: &seed_root,
+            requester: &seed_requester,
+            layout: &seed_layout,
+            // Hoisted writes NO slot -- the seed leaves only the CAS content
+            // and its store-index row, which is exactly the state the race
+            // produces: warm by row, with no slot anywhere yet.
+            node_linker: NodeLinker::Hoisted,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        entries: LockfileEntries { packages: Some(&packages), snapshots: Some(&snapshots) },
+        current_entries: LockfileEntries::default(),
+        store_index_writer: &seed_writer,
+        store_context: None,
+        cas_prefetch: None,
+        skipped: &seed_skipped,
+        include_optional_dependencies: true,
+        supported_architectures: None,
+        dir_clone_cache: None,
+        progress_reported: &progress_reported,
+        tarball_mem_cache: Some(&mem_cache),
+        custom_fetcher_session: None,
+        planned_canonical_fetches: None,
+        link_concurrency_probe: None,
+    }
+    .run::<SilentReporter>()
+    .await
+    .expect("the seed install materializes");
+    drop(seed_writer);
+    seed_task.await.expect("join seed writer").expect("flush seed writer");
+    assert!(
+        !global_virtual_store_dir.exists(),
+        "the seed must leave NO slot, only the row -- otherwise this is a different scenario",
+    );
+
+    // SECOND INSTALL, fresh project, with the policy. The row exists, so the
+    // package arrives WARM and the cold batch is empty -- but no slot exists
+    // here yet, so the second answer is what decides where it lands.
+    let workspace_root = root.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let policy = Arc::new(KeepsOnSecondAnswer::default());
+    let (config, virtual_store_dir) = build(&workspace_root, Some(Arc::clone(&policy)));
+    let layout = VirtualStoreLayout::new(
+        config,
+        None,
+        Some(&snapshots),
+        Some(&packages),
+        Some(&allow_build_policy),
+        None,
+        None,
+    );
+    assert!(
+        layout.slot_dir(&package_key).starts_with(&global_virtual_store_dir),
+        "the plan-time answer named nothing, so the plan is still the shared slot",
+    );
+    let skipped = SkippedSnapshots::new();
+    let (store_index_writer, writer_task) = StoreIndexWriter::spawn(&config.store_dir);
+    let requester = workspace_root.to_string_lossy().into_owned();
+    CreateVirtualStore {
+        ctx: &crate::InstallContext {
+            config,
+            workspace_root: &workspace_root,
+            requester: &requester,
+            layout: &layout,
+            node_linker: NodeLinker::Isolated,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        entries: LockfileEntries { packages: Some(&packages), snapshots: Some(&snapshots) },
+        current_entries: LockfileEntries::default(),
+        store_index_writer: &store_index_writer,
+        store_context: None,
+        cas_prefetch: None,
+        skipped: &skipped,
+        include_optional_dependencies: true,
+        supported_architectures: None,
+        dir_clone_cache: None,
+        progress_reported: &progress_reported,
+        tarball_mem_cache: Some(&mem_cache),
+        custom_fetcher_session: None,
+        planned_canonical_fetches: None,
+        link_concurrency_probe: None,
+    }
+    .run::<SilentReporter>()
+    .await
+    .expect("the warm package materializes");
+    drop(store_index_writer);
+    writer_task.await.expect("join store-index writer").expect("flush store-index writer");
+
+    assert_eq!(
+        policy.0.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the policy must be asked again even though this run fetched nothing",
+    );
+    let slot_dir = layout.slot_dir(&package_key);
+    assert!(
+        slot_dir.starts_with(&virtual_store_dir),
+        "the slot must follow the second answer into the project, got {slot_dir:?}",
+    );
+    assert!(
+        slot_dir.join("node_modules/warm-eject/package.json").is_file(),
+        "and the package must have been written THERE rather than left in the shared store",
+    );
+    assert!(
+        !global_virtual_store_dir.exists(),
+        "nothing may have been placed in the shared store: {global_virtual_store_dir:?}",
+    );
+}
