@@ -101,6 +101,13 @@ enum WriteMsg {
         channel: String,
         envelope_digest: String,
     },
+    /// Answer `response` once the batch carrying this message has been
+    /// committed. Ordering is what makes it a barrier: the writer task
+    /// drains in arrival order, so every row queued before this one is
+    /// already in the same batch or an earlier one.
+    Flush {
+        response: tokio::sync::oneshot::Sender<()>,
+    },
 }
 
 const MAX_QUARANTINED_REMOTE_SIDE_EFFECTS: usize = 64;
@@ -245,8 +252,9 @@ fn drain_queued(
 /// `SQLite`.
 fn flush_batch(index: &mut StoreIndex, batch: &mut Vec<WriteMsg>) {
     let mut pending: HashMap<String, PackageFilesIndex> = HashMap::with_capacity(batch.len());
+    let mut barriers: Vec<tokio::sync::oneshot::Sender<()>> = Vec::new();
     for msg in batch.drain(..) {
-        apply_write_msg(index, &mut pending, msg);
+        apply_write_msg(index, &mut pending, &mut barriers, msg);
     }
     if let Err(error) = index.set_many(pending.drain()) {
         // Drop the batch and keep going. One failed flush (e.g. a disk-full
@@ -259,6 +267,13 @@ fn flush_batch(index: &mut StoreIndex, batch: &mut Vec<WriteMsg>) {
             ?error,
             "batched store-index write failed; dropping this batch and continuing",
         );
+    }
+    // After the commit, never before: a waiter's whole reason for waiting is
+    // to read these rows back, and a failed flush still releases it — the
+    // rows are simply absent, which is what every reader of this index is
+    // already written to tolerate.
+    for barrier in barriers {
+        let _ = barrier.send(());
     }
 }
 
@@ -273,6 +288,7 @@ fn flush_batch(index: &mut StoreIndex, batch: &mut Vec<WriteMsg>) {
 fn apply_write_msg(
     index: &StoreIndex,
     pending: &mut HashMap<String, PackageFilesIndex>,
+    barriers: &mut Vec<tokio::sync::oneshot::Sender<()>>,
     msg: WriteMsg,
 ) {
     match msg {
@@ -296,6 +312,10 @@ fn apply_write_msg(
                 quarantine_digest(row, channel, envelope_digest);
             }
         }
+        // Held rather than answered: a barrier's whole meaning is "the rows
+        // ahead of me are committed", and nothing in this fold has committed
+        // anything yet.
+        WriteMsg::Flush { response } => barriers.push(response),
     }
 }
 
@@ -388,6 +408,21 @@ impl StoreIndexWriter {
     /// out real diagnostics.
     pub fn queue(&self, key: String, value: PackageFilesIndex) {
         self.send_msg(WriteMsg::Replace { key, value });
+    }
+
+    /// Return once every row queued before this call is committed, so a
+    /// reader opening `index.db` sees this install's own writes.
+    ///
+    /// The writer batches on its own task and nothing else waits for it
+    /// until the install tears down, so mid-install an independent reader
+    /// otherwise sees a store missing exactly the packages this run just
+    /// added. Returns immediately when the writer has exited or was never
+    /// opened ([`Self::spawn_disabled`]): there is then nothing queued to
+    /// wait for.
+    pub async fn flush(&self) {
+        let (response, committed) = tokio::sync::oneshot::channel();
+        self.send_msg(WriteMsg::Flush { response });
+        let _ = committed.await;
     }
 
     /// Queue a side-effects R/M/W: the writer task loads the row,

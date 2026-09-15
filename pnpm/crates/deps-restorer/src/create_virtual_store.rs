@@ -433,19 +433,47 @@ impl<'a> CreateVirtualStore<'a> {
         let links = self.link_plan(&plan);
         let mut indexes =
             CasIndexes::warm(links.shared_packages.as_ref(), &partition.warm, self.is_hoisted());
-        self.link_warm::<Reporter>(
-            wanted,
-            &partition,
-            &links,
-            marker_source.map(tempfile::NamedTempFile::path),
-        )?;
-        let fetch_failed = self
+        // A host policy deciding from what a package CONTAINS cannot answer
+        // for one this install is about to fetch, so when this run has cold
+        // packages the fetch goes FIRST and every slot is placed after the
+        // second answer — the one ordering where both halves of the policy's
+        // input exist at once. It costs the overlap between the link pass and
+        // the downloads, which is why nothing else takes it: with no policy,
+        // or with nothing cold, the order below is the one pnpm always ran.
+        let reconsult = self.reconsults_materialize_policy(&partition);
+        if !reconsult {
+            self.link_warm::<Reporter>(
+                wanted,
+                &partition,
+                &links,
+                marker_source.map(tempfile::NamedTempFile::path),
+            )?;
+        }
+        let (fetch_failed, deferred_cold) = self
             .download_cold::<Reporter>(
                 ColdInputs { wanted, store, prefetched, marker_source, links: &links },
-                &mut partition,
+                &partition.cold,
+                &mut partition.requires_build_by_snapshot,
                 &mut indexes,
+                reconsult,
             )
             .await?;
+        if reconsult {
+            self.reconsult_materialize_policy().await;
+            self.link_warm::<Reporter>(
+                wanted,
+                &partition,
+                &links,
+                marker_source.map(tempfile::NamedTempFile::path),
+            )?;
+            link_cold_chunk::<Reporter>(
+                &deferred_cold,
+                wanted.packages,
+                marker_source.map(tempfile::NamedTempFile::path),
+                &links.removed_aliases_by_key,
+                &LinkSlotsParallel { batch: "cold", ..links.template },
+            )?;
+        }
         self.apply_side_effects(wanted, &mut partition, &indexes.shared_base).await;
 
         // The writer is owned by the caller now. They drop their
@@ -698,18 +726,52 @@ impl<'a> CreateVirtualStore<'a> {
     /// written and each download's CAS index is the only output, folded
     /// into [`CasIndexes::by_pkg_id`]; the isolated linker's slot import
     /// has already happened by the time the download future returns.
-    async fn download_cold<Reporter: self::Reporter>(
+    /// Whether this install must take the host policy's answer again once
+    /// the cold batch has landed: only with a policy installed, only when
+    /// this run fetches something the plan-time answer could not see, and
+    /// never under the hoisted linker, which writes no slots for a layout
+    /// to place.
+    fn reconsults_materialize_policy(&self, partition: &partition::Partition<'_>) -> bool {
+        self.ctx.layout.defers_materialize_policy()
+            && !self.is_hoisted()
+            && !partition.cold.is_empty()
+    }
+
+    /// Take the host policy's answer again, with the store now holding what
+    /// this run fetched.
+    ///
+    /// The index flush is what makes those rows readable: the writer batches
+    /// them on its own task and nothing awaits it until the install tears
+    /// down, so a policy opening `index.db` would otherwise see a store
+    /// missing exactly the packages this install just added.
+    async fn reconsult_materialize_policy(&self) {
+        let Some(policy) = self.ctx.config.materialize_policy.as_deref() else {
+            return;
+        };
+        self.store_index_writer.flush().await;
+        self.ctx.layout.reconsult_materialize_policy(policy);
+    }
+
+    /// Download and extract the cold batch. Under `defer_links` the slots
+    /// are left for the caller to place once it has the policy's second
+    /// answer, and the captures come back rather than being consumed here.
+    async fn download_cold<'c, Reporter: self::Reporter>(
         &self,
-        inputs: ColdInputs<'_, 'a>,
-        partition: &mut partition::Partition<'_>,
+        inputs: ColdInputs<'_, 'c>,
+        cold: &'c [(&'c PackageKey, &'c SnapshotEntry)],
+        requires_build_by_snapshot: &mut RequiresBuildBySnapshot,
         indexes: &mut CasIndexes,
-    ) -> Result<HashSet<PackageKey>, CreateVirtualStoreError> {
+        defer_links: bool,
+    ) -> Result<(HashSet<PackageKey>, Vec<ColdCapture<'c>>), CreateVirtualStoreError>
+    where
+        'a: 'c,
+    {
         let runtime_platform_selector = runtime_platform_selector(self.supported_architectures);
         let mut fetch_failed = HashSet::new();
         let mut cold_cas_paths = Vec::new();
         run_cold_batch::<Reporter>(
             ColdBatch {
-                cold: &partition.cold,
+                cold,
                 installer: self.cold_installer(&inputs, &runtime_platform_selector),
                 packages: inputs.wanted.packages,
                 current_packages: self.current_entries.packages,
@@ -718,17 +780,23 @@ impl<'a> CreateVirtualStore<'a> {
                 link_template: &inputs.links.template,
                 shared_packages: inputs.links.shared_packages.as_ref(),
                 is_hoisted: self.is_hoisted(),
+                link_slots: !defer_links,
             },
             &mut ColdBatchState {
                 fetch_failed: &mut fetch_failed,
-                requires_build_by_snapshot: &mut partition.requires_build_by_snapshot,
+                requires_build_by_snapshot,
                 shared_base_cas_paths: &mut indexes.shared_base,
             },
             &mut cold_cas_paths,
         )
         .await?;
+        if defer_links {
+            // `by_pkg_id` is built for the hoisted linker alone, which never
+            // defers, so nothing here is owed to `add_cold`.
+            return Ok((fetch_failed, cold_cas_paths));
+        }
         indexes.add_cold(cold_cas_paths);
-        Ok(fetch_failed)
+        Ok((fetch_failed, Vec::new()))
     }
 
     // Defer slot links to the parallel drain, outside the cooperative download tasks.
@@ -1330,18 +1398,26 @@ fn swallow_optional_fetch_failure<Captured>(
 
 /// The invariant inputs of one cold-batch drain.
 /// The cold batch: snapshots whose tarball was not already in the store.
-struct ColdBatch<'a> {
+/// `'a` is the lockfile data a capture keeps a reference to; `'i` is
+/// everything the batch only reads while it runs. They are separate so a
+/// caller can outlive the batch holding its captures.
+struct ColdBatch<'i, 'a> {
     cold: &'a [(&'a PackageKey, &'a SnapshotEntry)],
-    installer: InstallPackageBySnapshot<'a>,
+    installer: InstallPackageBySnapshot<'i>,
     packages: &'a HashMap<PackageKey, PackageMetadata>,
     current_packages: Option<&'a HashMap<PackageKey, PackageMetadata>>,
     /// Kept alive by the caller for the whole batch: every slot that
     /// needs a build marker hard-links this one file.
-    marker_source: Option<&'a tempfile::NamedTempFile>,
-    removed_aliases_by_key: &'a HashMap<PackageKey, Vec<PkgName>>,
-    link_template: &'a LinkSlotsParallel<'a>,
-    shared_packages: Option<&'a HashSet<&'a str>>,
+    marker_source: Option<&'i tempfile::NamedTempFile>,
+    removed_aliases_by_key: &'i HashMap<PackageKey, Vec<PkgName>>,
+    link_template: &'i LinkSlotsParallel<'i>,
+    shared_packages: Option<&'i HashSet<&'i str>>,
     is_hoisted: bool,
+    /// Whether this batch places its own slots. `false` leaves every
+    /// capture for the caller, which is what an install waiting on a host
+    /// policy's second answer needs — see
+    /// `CreateVirtualStore::materialize_plan`.
+    link_slots: bool,
 }
 
 /// Download every cold snapshot and link each one as it lands.
@@ -1350,7 +1426,7 @@ struct ColdBatch<'a> {
 /// chunks between completions — see [`drain_cold_downloads`] for why the
 /// two are interleaved rather than run in sequence.
 async fn run_cold_batch<'a, Reporter: self::Reporter>(
-    batch: ColdBatch<'a>,
+    batch: ColdBatch<'_, 'a>,
     state: &mut ColdBatchState<'_>,
     cold_cas_paths: &mut Vec<ColdCapture<'a>>,
 ) -> Result<(), CreateVirtualStoreError> {
@@ -1375,6 +1451,7 @@ async fn run_cold_batch<'a, Reporter: self::Reporter>(
             template: &cold_template,
             shared_packages: batch.shared_packages,
             is_hoisted: batch.is_hoisted,
+            link_slots: batch.link_slots,
         },
         state,
         cold_cas_paths,
@@ -1386,7 +1463,7 @@ async fn run_cold_batch<'a, Reporter: self::Reporter>(
 /// slot instead of failing the batch; the second carries what the link
 /// pass still has to place.
 async fn download_one<'a, Reporter: self::Reporter>(
-    batch: &ColdBatch<'a>,
+    batch: &ColdBatch<'_, 'a>,
     snapshot_key: &'a PackageKey,
     snapshot: &'a SnapshotEntry,
 ) -> Result<(Option<PackageKey>, Option<ColdCapture<'a>>), CreateVirtualStoreError> {
@@ -1426,6 +1503,7 @@ struct ColdDrain<'a> {
     template: &'a LinkSlotsParallel<'a>,
     shared_packages: Option<&'a HashSet<&'a str>>,
     is_hoisted: bool,
+    link_slots: bool,
 }
 
 /// Consume the cold downloads as they finish, linking each ready chunk.
@@ -1453,7 +1531,9 @@ where
         let Some(captured) = record_cold_outcome(outcome?, state, drain.shared_packages) else {
             continue;
         };
-        if drain.is_hoisted {
+        // The hoisted linker writes no slots at all; a deferred batch writes
+        // them later, once the layout the caller is waiting on is settled.
+        if drain.is_hoisted || !drain.link_slots {
             cold_cas_paths.push(captured);
             continue;
         }
