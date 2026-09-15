@@ -23,7 +23,6 @@ const NUB: Embedder = Embedder {
     patched_dependencies_writer: None,
     node_execpath: None,
     pnpm_execpath: None,
-
     script_bin_dir: None,
     extract_observer: None,
     materialize_policy: None,

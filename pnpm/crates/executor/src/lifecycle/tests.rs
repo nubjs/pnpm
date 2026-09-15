@@ -8,7 +8,7 @@ use pnpm_reporter::{
     LifecycleMessage, LifecycleStdio, LogEvent, LogLevel, Reporter, SilentReporter,
 };
 use pretty_assertions::assert_eq;
-use std::{collections::HashMap, fs, io::Cursor, sync::Mutex};
+use std::{collections::HashMap, ffi::OsString, fs, io::Cursor, path::PathBuf, sync::Mutex};
 use tempfile::tempdir;
 
 #[test]
@@ -343,32 +343,56 @@ fn lifecycle_runs_under_silent_reporter() {
 /// The dependency-lifecycle path builds its own `PATH` — `prepare_lifecycle_path`
 /// rather than `run_script`'s `child_env` — so a host's bin directory reaching a
 /// `pnpm run` script proves nothing about a `postinstall`. Same guarantee, second
-/// spawn site: the shim resolves for the script, and the process is untouched.
+/// spawn site, and the second half of it: the process is left alone.
 #[test]
-#[cfg_attr(target_os = "windows", ignore = "uses a POSIX shell script body")]
 fn a_script_bin_dir_reaches_a_lifecycle_script_and_never_the_process() {
     let dir = tempdir().expect("create temp dir");
     let pkg_root = dir.path();
     let shims = pkg_root.join("host-shim-1234-abcd");
-    fs::create_dir_all(&shims).expect("create the shim dir");
-    let shim = shims.join("probe-shim");
-    fs::write(&shim, "#!/bin/sh\nprintf ok\n").expect("write the shim");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("chmod the shim");
-    }
 
-    let marker = pkg_root.join("out.txt");
-    let manifest = serde_json::json!({
-        "name": "z",
-        "version": "1.0.0",
-        "scripts": { "postinstall": format!(r#"probe-shim > "{}""#, marker.display()) },
-    });
-    fs::write(pkg_root.join("package.json"), manifest.to_string()).expect("write manifest");
+    let before = std::env::var_os("PATH").expect("the test process has a PATH");
+    let path = lifecycle_path(pkg_root, Some(&shims));
+    assert_eq!(
+        std::env::var_os("PATH").as_ref(),
+        Some(&before),
+        "building a lifecycle PATH must not edit the process PATH",
+    );
 
+    let entries: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    let shim_idx = entries
+        .iter()
+        .position(|entry| *entry == shims)
+        .unwrap_or_else(|| panic!("the shim dir is missing from the lifecycle PATH: {entries:?}"));
+    let inherited: Vec<PathBuf> = std::env::split_paths(&before).collect();
+    let first_inherited = entries
+        .iter()
+        .position(|entry| inherited.contains(entry))
+        .expect("the inherited PATH should survive into the lifecycle script");
+    assert_eq!(
+        shim_idx + 1,
+        first_inherited,
+        "the shim dir must sit immediately ahead of the inherited PATH: {entries:?}",
+    );
+
+    let plain = lifecycle_path(pkg_root, None);
+    assert!(
+        !std::env::split_paths(&plain).any(|entry| entry == shims),
+        "pnpm's own profile must add nothing: {plain:?}",
+    );
+}
+
+/// The `PATH` [`run_postinstall_hooks`] would spawn a lifecycle script with.
+///
+/// Built rather than spawned because [`crate::ProcessTracker::cancel`] kills
+/// every descendant of this process, so a script running while
+/// `process_tracker::tests` cancels is killed with SIGKILL under any `--test-threads`
+/// above one.
+fn lifecycle_path(
+    pkg_root: &std::path::Path,
+    script_bin_dir: Option<&std::path::Path>,
+) -> OsString {
     let extra_env: HashMap<String, String> = HashMap::new();
-    let extra_bin_paths: Vec<std::path::PathBuf> = vec![];
+    let extra_bin_paths: Vec<PathBuf> = vec![];
     let opts = RunPostinstallHooks {
         dep_path: "/z@1.0.0",
         pkg_root,
@@ -377,7 +401,7 @@ fn a_script_bin_dir_reaches_a_lifecycle_script_and_never_the_process() {
         extra_bin_paths: &extra_bin_paths,
         extra_env: &extra_env,
         node_execpath: None,
-        script_bin_dir: Some(&shims),
+        script_bin_dir,
         npm_execpath: None,
         node_gyp_path: None,
         user_agent: None,
@@ -388,20 +412,11 @@ fn a_script_bin_dir_reaches_a_lifecycle_script_and_never_the_process() {
         shell_emulator: false,
         optional: false,
     };
-
-    let before = std::env::var_os("PATH");
-    let ran = run_postinstall_hooks::<SilentReporter>(&opts).expect("postinstall");
-    assert!(ran, "postinstall script should report executed");
-    assert_eq!(
-        std::env::var_os("PATH"),
-        before,
-        "a lifecycle script must not edit the process PATH"
-    );
-    assert_eq!(
-        fs::read_to_string(&marker).expect("read marker"),
-        "ok",
-        "the shim dir's command should resolve for the lifecycle script",
-    );
+    let manifest = serde_json::json!({ "name": "z", "version": "1.0.0" });
+    // The process environment, exactly as `run_postinstall_hooks` captures it.
+    let parent_env: HashMap<String, String> = std::env::vars().collect();
+    let built = super::lifecycle_env("postinstall", "true", &opts, &manifest, &parent_env);
+    super::prepare_lifecycle_path(&opts, "postinstall", &built).expect("build the lifecycle PATH")
 }
 
 #[test]

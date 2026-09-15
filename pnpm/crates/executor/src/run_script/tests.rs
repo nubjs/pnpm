@@ -9,6 +9,11 @@ use std::{
 };
 use tempfile::tempdir;
 
+#[cfg(unix)]
+const SEP: char = ':';
+#[cfg(windows)]
+const SEP: char = ';';
+
 #[test]
 fn posix_quote_leaves_safe_strings_unquoted() {
     assert_eq!(posix_quote("hello-world"), "hello-world");
@@ -61,16 +66,6 @@ fn manifest() -> serde_json::Value {
 }
 
 fn run(pkg_root: &Path, stage: &str, script: &str, args: &[String]) -> ScriptExit {
-    run_with_script_bin_dir(pkg_root, stage, script, args, None)
-}
-
-fn run_with_script_bin_dir(
-    pkg_root: &Path,
-    stage: &str,
-    script: &str,
-    args: &[String],
-    script_bin_dir: Option<&Path>,
-) -> ScriptExit {
     let extra_env = HashMap::new();
     run_script(&RunScript {
         manifest: &manifest(),
@@ -84,7 +79,7 @@ fn run_with_script_bin_dir(
         shell_emulator: false,
         scripts_prepend_node_path: ScriptsPrependNodePath::Never,
         node_execpath: None,
-        script_bin_dir,
+        script_bin_dir: None,
         npm_execpath: None,
         user_agent: None,
         extra_env: &extra_env,
@@ -125,72 +120,83 @@ fn run_script_prepends_node_modules_bin_to_path() {
     );
 }
 
-/// The whole point of the seam: an embedding host's bin directory reaches
-/// the script — resolving a bare command name ahead of anything the
-/// inherited `PATH` offers — while the process the engine runs in never
-/// learns about it. A host that instead prepends the directory to its own
-/// `PATH` moves every cache key the engine derives from the environment,
-/// which is what this exists to avoid.
+/// The whole point of the seam: the host's bin directory is in the `PATH`
+/// the script is spawned with, ahead of everything the process inherited,
+/// while the process the engine runs in never learns about it. A host that
+/// instead prepends the directory to its own `PATH` moves every cache key
+/// the engine derives from the environment, which is what this avoids.
+///
+/// Asserts on [`child_env`] — the map handed to `Command::envs` — rather
+/// than on a spawned shell, because [`crate::ProcessTracker::cancel`] kills
+/// every descendant of this process, so a script running while
+/// `process_tracker::tests` cancels is killed with SIGKILL under any `--test-threads`
+/// above one.
 #[test]
-#[cfg_attr(target_os = "windows", ignore = "uses a POSIX shell script body")]
 fn a_script_bin_dir_reaches_the_script_and_never_the_process() {
     let dir = tempdir().expect("temp dir");
     let shims = dir.path().join("host-shim-1234-abcd");
-    fs::create_dir_all(&shims).expect("create the shim dir");
 
-    // Two shims: one under a name nothing else answers to, proving the dir
-    // is reachable at all, and one shadowing `env`, proving it outranks the
-    // inherited PATH. Resolution is the evidence — a substring match on
-    // `$PATH` would pass on a directory no command could actually be found in.
-    for (name, body) in [("probe-shim", "#!/bin/sh\nprintf ok\n"), ("env", "#!/bin/sh\n")] {
-        let shim = shims.join(name);
-        fs::write(&shim, body).expect("write the shim");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).expect("chmod the shim");
-        }
-    }
-
-    let marker = dir.path().join("out.txt");
-    let script = format!(
-        r#"printf '%s|%s|%s' "$(probe-shim)" "$(command -v env)" "$PATH" > "{}""#,
-        marker.display(),
-    );
-
-    let before = std::env::var_os("PATH");
-    let status = run_with_script_bin_dir(dir.path(), "build", &script, &[], Some(&shims));
-    let after = std::env::var_os("PATH");
-
-    assert!(status.success(), "the script should exit cleanly");
-    assert_eq!(before, after, "running a script must not edit the process PATH");
-
-    let written = fs::read_to_string(&marker).expect("read marker");
-    let fields: Vec<&str> = written.split('|').collect();
-    assert_eq!(fields.len(), 3, "marker should hold three fields, got {written:?}");
-    assert_eq!(fields[0], "ok", "the shim dir's own command should be runnable");
+    let before = std::env::var_os("PATH").expect("the test process has a PATH");
+    let built = script_env(dir.path(), Some(&shims));
     assert_eq!(
-        Path::new(fields[1]),
-        shims.join("env"),
-        "`env` should resolve to the shim, not the system one",
+        std::env::var_os("PATH").as_ref(),
+        Some(&before),
+        "building a script environment must not edit the process PATH",
     );
 
-    let entries: Vec<&Path> = fields[2].split(':').map(Path::new).collect();
+    let path = built.get("PATH").expect("the script environment carries a PATH");
+    let entries: Vec<&Path> = path.split(SEP).map(Path::new).collect();
     let shim_idx = entries
         .iter()
         .position(|entry| *entry == shims)
         .unwrap_or_else(|| panic!("the shim dir is missing from the script PATH: {entries:?}"));
-    let inherited: Vec<PathBuf> =
-        before.as_ref().map(|value| std::env::split_paths(value).collect()).unwrap_or_default();
+    let inherited: Vec<PathBuf> = std::env::split_paths(&before).collect();
     let first_inherited = entries
         .iter()
-        .position(|entry| inherited.iter().any(|orig| orig == *entry))
+        .position(|entry| inherited.iter().any(|original| original == *entry))
         .expect("the inherited PATH should survive into the script");
     assert_eq!(
         shim_idx + 1,
         first_inherited,
         "the shim dir must sit immediately ahead of the inherited PATH: {entries:?}",
     );
+
+    // The control: without a host directory the script PATH holds no entry
+    // outside the project's own `.bin` and what the process inherited.
+    let plain = script_env(dir.path(), None);
+    let plain_path = plain.get("PATH").expect("the script environment carries a PATH");
+    assert!(
+        !plain_path.split(SEP).any(|entry| Path::new(entry) == shims),
+        "pnpm's own profile must add nothing: {plain_path:?}",
+    );
+}
+
+/// The environment [`run_script`] would spawn a script with.
+fn script_env(pkg_root: &Path, script_bin_dir: Option<&Path>) -> HashMap<String, String> {
+    let extra_env = HashMap::new();
+    super::child_env(
+        &RunScript {
+            manifest: &manifest(),
+            stage: "build",
+            script: "true",
+            args: &[],
+            pkg_root,
+            init_cwd: pkg_root,
+            extra_bin_paths: &[],
+            script_shell: None,
+            shell_emulator: false,
+            scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+            node_execpath: None,
+            script_bin_dir,
+            npm_execpath: None,
+            user_agent: None,
+            extra_env: &extra_env,
+            silent: true,
+            output: ScriptOutput::Inherit,
+            process_tracker: None,
+        },
+        "true",
+    )
 }
 
 #[test]
