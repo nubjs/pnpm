@@ -1184,3 +1184,151 @@ fn group_slots_by_dir_is_identity_without_gvs() {
     assert_eq!(groups.len(), 2, "non-GVS slots are unique per key; nothing may merge");
     assert!(groups.iter().all(|group| group.duplicates.is_empty()));
 }
+
+/// Names its package only when asked a second time, and counts the asks.
+///
+/// Stands in for a policy deciding by what a package CONTAINS: the plan-time
+/// answer is taken before a byte is fetched, so for the packages an install
+/// is there to add it has nothing to read.
+#[derive(Debug, Default)]
+struct KeepsOnSecondAnswer(std::sync::atomic::AtomicUsize);
+
+impl pnpm_store_dir::MaterializePolicy for KeepsOnSecondAnswer {
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> HashSet<String> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return HashSet::new();
+        }
+        resolved.iter().map(|package| package.id.to_owned()).collect()
+    }
+}
+
+/// An install that fetches a package places its slot by the answer taken
+/// AFTER the fetch, not the blind one taken before it.
+///
+/// This is the whole point of the deferral: on the install that first
+/// fetches a package — the one where being kept out of the shared store
+/// matters most — a content-deciding policy asked at plan time can only
+/// answer "no".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cold_package_is_placed_by_the_answer_taken_after_the_fetch() {
+    use crate::{AllowBuildPolicy, SkippedSnapshots, VirtualStoreLayout};
+    use pnpm_config::{Config, NodeLinker, PackageImportMethod};
+    use pnpm_store_dir::StoreIndexWriter;
+    use pnpm_tarball::{CacheValue, MemCache, SharedReportedProgressKeys};
+
+    let root = tempfile::tempdir().expect("create temp dir");
+    let workspace_root = root.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let modules_dir = workspace_root.join("node_modules");
+    let virtual_store_dir = modules_dir.join(".pnpm");
+    let global_virtual_store_dir = root.path().join("store/links");
+
+    let mut config = Config::new();
+    config.registry = "https://registry.test".to_string();
+    config.store_dir = root.path().join("store").into();
+    config.modules_dir = modules_dir;
+    config.virtual_store_dir = virtual_store_dir.clone();
+    config.global_virtual_store_dir = global_virtual_store_dir.clone();
+    config.enable_global_virtual_store = true;
+    config.package_import_method = PackageImportMethod::Copy;
+    config.offline = true;
+    let policy = Arc::new(KeepsOnSecondAnswer::default());
+    config.materialize_policy =
+        Some(Arc::clone(&policy) as Arc<dyn pnpm_store_dir::MaterializePolicy>);
+    let config = config.leak();
+
+    let package_key = key("cold-eject", "1.0.0");
+    let source_dir = workspace_root.join("prefetched").join("cold-eject");
+    fs::create_dir_all(&source_dir).expect("create prefetched package dir");
+    let manifest_path = source_dir.join("package.json");
+    fs::write(&manifest_path, r#"{"name":"cold-eject","version":"1.0.0"}"#)
+        .expect("write package manifest");
+    let mem_cache = Arc::new(MemCache::default());
+    mem_cache.insert(
+        "https://registry.test/cold-eject/-/cold-eject-1.0.0.tgz".to_string(),
+        Arc::new(tokio::sync::RwLock::new(CacheValue::Available(Arc::new(HashMap::from([(
+            "package.json".to_string(),
+            manifest_path,
+        )]))))),
+    );
+    let snapshots = HashMap::from([(package_key.clone(), SnapshotEntry::default())]);
+    let packages =
+        HashMap::from([(package_key.without_peer(), metadata_with_integrity(DUMMY_SHA512))]);
+
+    let allow_build_policy = AllowBuildPolicy::default();
+    let layout = VirtualStoreLayout::new(
+        config,
+        None,
+        Some(&snapshots),
+        Some(&packages),
+        Some(&allow_build_policy),
+        None,
+        None,
+    );
+    assert!(
+        layout.slot_dir(&package_key).starts_with(&global_virtual_store_dir),
+        "the plan-time answer named nothing, so the plan is still the shared slot",
+    );
+    let skipped = SkippedSnapshots::new();
+    let logged_methods = AtomicU8::new(0);
+    let progress_reported = SharedReportedProgressKeys::default();
+    let (store_index_writer, writer_task) = StoreIndexWriter::spawn(&config.store_dir);
+    let requester = workspace_root.to_string_lossy().into_owned();
+
+    CreateVirtualStore {
+        ctx: &crate::InstallContext {
+            config,
+            workspace_root: &workspace_root,
+            requester: &requester,
+            layout: &layout,
+            node_linker: NodeLinker::Isolated,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        entries: LockfileEntries { packages: Some(&packages), snapshots: Some(&snapshots) },
+        current_entries: LockfileEntries::default(),
+        store_index_writer: &store_index_writer,
+        store_context: None,
+        cas_prefetch: None,
+        skipped: &skipped,
+        include_optional_dependencies: true,
+        supported_architectures: None,
+        dir_clone_cache: None,
+        progress_reported: &progress_reported,
+        tarball_mem_cache: Some(&mem_cache),
+        custom_fetcher_session: None,
+        planned_canonical_fetches: None,
+        link_concurrency_probe: None,
+    }
+    .run::<SilentReporter>()
+    .await
+    .expect("the cold package materializes from the mem cache");
+
+    drop(store_index_writer);
+    writer_task.await.expect("join store-index writer").expect("flush store-index writer");
+
+    assert_eq!(
+        policy.0.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the policy must be asked again once the fetch has landed",
+    );
+    let slot_dir = layout.slot_dir(&package_key);
+    assert!(
+        slot_dir.starts_with(&virtual_store_dir),
+        "the slot must follow the second answer into the project, got {slot_dir:?}",
+    );
+    assert!(
+        slot_dir.join("node_modules/cold-eject/package.json").is_file(),
+        "and the package must have been written THERE rather than to the shared store",
+    );
+    assert!(
+        !global_virtual_store_dir.exists(),
+        "nothing may have been placed in the shared store: {global_virtual_store_dir:?}",
+    );
+}

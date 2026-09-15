@@ -507,3 +507,66 @@ fn open_immutable_reads_wal_db_on_readonly_directory() {
         );
     }
 }
+
+/// A reader that opens `index.db` afresh sees nothing the writer task has
+/// not committed, and nothing else awaits that task until the install tears
+/// down — so a caller that has to read its own writes back mid-install needs
+/// a barrier.
+///
+/// Two batches' worth of rows makes the assertion about the barrier rather
+/// than about luck: without one, a reader racing a 512-row backlog finds a
+/// prefix of it at best.
+#[tokio::test]
+async fn a_flush_returns_only_once_the_queued_rows_are_readable() {
+    let dir = tempdir().unwrap();
+    let store_dir = StoreDir::new(dir.path());
+    let (writer, task) = super::StoreIndexWriter::spawn(&store_dir);
+
+    let keys: Vec<String> = (0..512)
+        .map(|index| store_index_key("sha512-flush", &format!("pkg-{index}@1.0.0")))
+        .collect();
+    for key in &keys {
+        writer.queue(key.clone(), sample_index());
+    }
+    writer.flush().await;
+
+    let index = StoreIndex::open(store_dir.root()).unwrap();
+    let missing: Vec<&String> =
+        keys.iter().filter(|key| index.get(key).unwrap().is_none()).collect();
+    assert!(missing.is_empty(), "{} of {} rows were not committed", missing.len(), keys.len());
+
+    drop(index);
+    drop(writer);
+    task.await.unwrap().unwrap();
+}
+
+/// A writer that never opened `index.db` drains and drops every message, so
+/// a barrier there has nothing to wait for and must not hang the caller.
+#[tokio::test]
+async fn a_flush_against_a_disabled_writer_returns() {
+    let (writer, task) = super::StoreIndexWriter::spawn_disabled();
+    writer.queue(store_index_key("sha512-disabled", "pkg@1.0.0"), sample_index());
+    writer.flush().await;
+    drop(writer);
+    task.await.unwrap().unwrap();
+}
+
+/// A writer whose task has exited — the index would not open, or the
+/// install has already torn it down — drops every message silently, so a
+/// barrier behind one must return rather than park forever. This is the
+/// case that would take an install down with the writer instead of
+/// degrading the way every other write here does.
+#[tokio::test]
+async fn a_flush_behind_a_dead_writer_returns() {
+    let dir = tempdir().unwrap();
+    let store_dir = StoreDir::new(dir.path());
+    // `index.db` as a directory is a `SQLite` open failure, so the writer
+    // task returns before it can serve anything.
+    std::fs::create_dir_all(store_dir.root().join("index.db")).unwrap();
+
+    let (writer, task) = super::StoreIndexWriter::spawn(&store_dir);
+    assert!(task.await.unwrap().is_err(), "the writer task must have exited on the open failure");
+
+    writer.queue(store_index_key("sha512-dead", "pkg@1.0.0"), sample_index());
+    writer.flush().await;
+}

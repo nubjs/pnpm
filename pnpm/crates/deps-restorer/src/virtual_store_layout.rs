@@ -111,6 +111,61 @@ pub struct VirtualStoreLayout {
     /// built rather than per slot lookup, so the decision cannot differ
     /// between two reads of the same package.
     locally_materialized: HashSet<PackageKey>,
+
+    /// What a second consultation of the same policy needs, and the answer
+    /// it gave. `None` without a policy and without the global virtual
+    /// store, which is every standalone pnpm install.
+    deferred_policy: Option<DeferredPolicy>,
+}
+
+/// The policy's own inputs, retained so the install can ask again once it
+/// has extracted what it fetched, plus that second answer.
+///
+/// A policy deciding from what a package CONTAINS can say nothing about a
+/// package the store does not hold yet, and at plan time the store holds
+/// none of what this run is about to fetch — so the plan-time answer covers
+/// only the packages that were already there. See
+/// [`VirtualStoreLayout::reconsult_materialize_policy`].
+///
+/// The rows are kept in the flattened, lockfile-free shape the seam takes
+/// rather than as lockfile types, for the reason
+/// [`VirtualStoreLayout::apply_materialize_policy`] flattens them at all:
+/// resolving a dependency reference to the key it points at is lockfile
+/// work, and it is done once.
+struct DeferredPolicy {
+    /// Per snapshot: the key it takes in this layout, then the three
+    /// fields a [`pnpm_store_dir::ResolvedPackage`] borrows.
+    rows: Vec<(PackageKey, String, Vec<String>, Option<String>)>,
+    /// The identifiers a project of the install depends on directly.
+    root_direct: HashSet<String>,
+    /// The post-fetch answer. Set at most once, and only ever ADDS to
+    /// `locally_materialized`: the slot probe that decided what this
+    /// install re-links has already run against the first answer, so a
+    /// second answer that took a package back would strand a slot the
+    /// probe treated as settled.
+    late: std::sync::OnceLock<HashSet<PackageKey>>,
+}
+
+impl DeferredPolicy {
+    /// The keys `policy` names, among the retained rows.
+    fn ask(&self, policy: &dyn pnpm_store_dir::MaterializePolicy) -> HashSet<PackageKey> {
+        let resolved: Vec<pnpm_store_dir::ResolvedPackage<'_>> = self
+            .rows
+            .iter()
+            .map(|(_, id, dependencies, index_key)| pnpm_store_dir::ResolvedPackage {
+                id,
+                dependencies,
+                index_key: index_key.as_deref(),
+                root_direct: self.root_direct.contains(id),
+            })
+            .collect();
+        let keep_local = policy.materialize_locally(&resolved);
+        self.rows
+            .iter()
+            .filter(|(_, id, _, _)| keep_local.contains(id))
+            .map(|(key, ..)| key.clone())
+            .collect()
+    }
 }
 
 impl VirtualStoreLayout {
@@ -130,6 +185,7 @@ impl VirtualStoreLayout {
             lockfile_dir: None,
             local_store_dir: None,
             locally_materialized: HashSet::new(),
+            deferred_policy: None,
         }
     }
 
@@ -234,6 +290,7 @@ impl VirtualStoreLayout {
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
                 local_store_dir: None,
                 locally_materialized: HashSet::new(),
+                deferred_policy: None,
             };
         }
         let mut layout = Self::global(
@@ -286,7 +343,7 @@ impl VirtualStoreLayout {
             })
             .filter_map(|(name, spec)| Some(spec.version.resolved_key(name)?.pkg_id()))
             .collect();
-        let rows: Vec<(String, Vec<String>, Option<String>)> = snapshots
+        let rows: Vec<(PackageKey, String, Vec<String>, Option<String>)> = snapshots
             .iter()
             .map(|(key, entry)| {
                 let dependencies = entry
@@ -307,24 +364,55 @@ impl VirtualStoreLayout {
                         !config.ignore_scripts,
                     )
                 });
-                (pkg_id, dependencies, index_key)
+                (key.clone(), pkg_id, dependencies, index_key)
             })
             .collect();
-        let resolved: Vec<pnpm_store_dir::ResolvedPackage<'_>> = rows
-            .iter()
-            .map(|(id, dependencies, index_key)| pnpm_store_dir::ResolvedPackage {
-                id,
-                dependencies,
-                index_key: index_key.as_deref(),
-                root_direct: root_direct.contains(id),
-            })
-            .collect();
-        let keep_local = policy.materialize_locally(&resolved);
-        self.locally_materialized =
-            snapshots.keys().filter(|key| keep_local.contains(&key.pkg_id())).cloned().collect();
-        if !self.locally_materialized.is_empty() {
-            self.local_store_dir = Some(config.virtual_store_dir.clone());
-        }
+        let deferred = DeferredPolicy { rows, root_direct, late: std::sync::OnceLock::new() };
+        self.locally_materialized = deferred.ask(policy);
+        // Unconditional once a policy is installed, because the second
+        // answer can name a package this first one did not and there is no
+        // later point that sets it.
+        self.local_store_dir = Some(config.virtual_store_dir.clone());
+        self.deferred_policy = Some(deferred);
+    }
+
+    /// Whether this layout can take the host policy's answer again — true
+    /// exactly when a host set one and the global virtual store is on, so
+    /// there is a shared store for a package to be kept out of.
+    #[must_use]
+    pub fn defers_materialize_policy(&self) -> bool {
+        self.deferred_policy.is_some()
+    }
+
+    /// Take the host policy's answer again, now that the install has
+    /// extracted the packages it fetched, and ADD what it names to the
+    /// plan-time answer.
+    ///
+    /// The plan-time answer is taken before a byte is fetched, so a policy
+    /// deciding from what a package CONTAINS can only answer there for
+    /// packages the store already held — on the install that first fetches
+    /// a package, the one where being kept out of the shared store matters
+    /// most, it has nothing to read. The caller places no slot until this
+    /// has run; see `CreateVirtualStore::materialize_plan`.
+    ///
+    /// A no-op without a policy, and after the first call: the answer is
+    /// taken once so two slot lookups for the same package cannot disagree.
+    pub fn reconsult_materialize_policy(&self, policy: &dyn pnpm_store_dir::MaterializePolicy) {
+        let Some(deferred) = self.deferred_policy.as_ref() else {
+            return;
+        };
+        deferred.late.get_or_init(|| deferred.ask(policy));
+    }
+
+    /// Whether `key`'s slot belongs in the project rather than the shared
+    /// store, by either answer the policy gave.
+    fn keeps_local(&self, key: &PackageKey) -> bool {
+        self.locally_materialized.contains(key)
+            || self
+                .deferred_policy
+                .as_ref()
+                .and_then(|deferred| deferred.late.get())
+                .is_some_and(|late| late.contains(key))
     }
 
     /// [`Self::new`], with the derived suffix map cached on disk.
@@ -421,6 +509,7 @@ impl VirtualStoreLayout {
             lockfile_dir: lockfile_dir.map(Path::to_path_buf),
             local_store_dir: None,
             locally_materialized: HashSet::new(),
+            deferred_policy: None,
         };
         // The cache stores the suffix map, which the policy does not
         // touch, so a cached layout still has to be narrowed here.
@@ -454,6 +543,7 @@ impl VirtualStoreLayout {
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
                 local_store_dir: None,
                 locally_materialized: HashSet::new(),
+                deferred_policy: None,
             };
         };
         let mut hasher =
@@ -465,6 +555,7 @@ impl VirtualStoreLayout {
             lockfile_dir: lockfile_dir.map(Path::to_path_buf),
             local_store_dir: None,
             locally_materialized: HashSet::new(),
+            deferred_policy: None,
         }
     }
 
@@ -508,7 +599,7 @@ impl VirtualStoreLayout {
     pub fn hashed_slot_dir(&self, key: &PackageKey) -> Option<PathBuf> {
         // A package held out of the shared store has no canonical shared
         // slot, so the directory-clone cache must not claim one for it.
-        if self.locally_materialized.contains(key) {
+        if self.keeps_local(key) {
             return None;
         }
         let suffix = self.gvs_suffixes.as_ref()?.get(key)?;
@@ -521,7 +612,7 @@ impl VirtualStoreLayout {
     #[must_use]
     pub fn slot_store_dir(&self, key: &PackageKey) -> &Path {
         match &self.local_store_dir {
-            Some(local_store_dir) if self.locally_materialized.contains(key) => local_store_dir,
+            Some(local_store_dir) if self.keeps_local(key) => local_store_dir,
             _ => &self.package_store_dir,
         }
     }
@@ -529,7 +620,7 @@ impl VirtualStoreLayout {
     #[must_use]
     pub fn slot_dir(&self, key: &PackageKey) -> PathBuf {
         if let Some(local_store_dir) = self.local_store_dir.as_ref()
-            && self.locally_materialized.contains(key)
+            && self.keeps_local(key)
         {
             return local_store_dir
                 .join(key.to_virtual_store_name(self.virtual_store_dir_max_length));
