@@ -8,8 +8,9 @@
 //! wrapper that prefixes the inner message with context
 //! ("Failed to resolve dependency tree: {inner}") repeats it just as
 //! fully, one line above. The handler here folds those levels away
-//! before delegating to miette's own renderer, which keeps every theme,
-//! width, and colour decision miette would otherwise make.
+//! before delegating to miette's own renderer, which keeps miette's theme,
+//! width and colour decisions. [`handler`] pins exactly one thing miette
+//! would otherwise leave to chance, and says there why.
 
 use miette::{
     Diagnostic, LabeledSpan, MietteHandler, MietteHandlerOpts, ReportHandler, Severity, SourceCode,
@@ -23,9 +24,27 @@ use std::{error::Error, fmt};
 /// already installed is left alone — the first caller wins, and the
 /// only caller is the CLI entry point.
 pub fn install_report_handler() {
-    let _ = miette::set_hook(Box::new(|_| {
-        Box::new(CollapsingHandler { inner: MietteHandlerOpts::new().build() })
-    }));
+    let _ = miette::set_hook(Box::new(|_| Box::new(CollapsingHandler { inner: handler() })));
+}
+
+/// miette's renderer, with the one decision this crate does not leave to it:
+/// a word is never split at a hyphen.
+///
+/// miette wraps a diagnostic with `textwrap` and exposes no way to pin the
+/// wrap ALGORITHM, and textwrap chooses that from whether its optional
+/// `smawk` dependency was compiled in -- greedy without it, line-balancing
+/// with it. Cargo unifies features per crate version across a whole binary,
+/// so the choice belongs to whoever links this engine rather than to this
+/// crate: one unrelated dependency taking textwrap's default features turns
+/// balancing on, and balancing will split a word at a hyphen to even the
+/// lines out even when the whole word would have fitted. A package name
+/// broken mid-name reads as a different package, which is the one wrapping
+/// outcome a diagnostic cannot afford.
+///
+/// Measured on a build with `smawk` absent -- pnpm's own -- this changes
+/// nothing: the three splitter settings render identically there.
+fn handler() -> MietteHandler {
+    MietteHandlerOpts::new().word_splitter(textwrap::WordSplitter::NoHyphenation).build()
 }
 
 struct CollapsingHandler {

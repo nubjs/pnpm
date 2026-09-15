@@ -12,6 +12,7 @@ repository.workspace  = true
 
 [dependencies]
 miette             = { workspace = true }
+textwrap           = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["json"] }
 

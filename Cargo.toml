@@ -212,6 +212,7 @@ sysinfo            = { version = "0.39.2" }
 tabled             = { version = "0.21", features = ["ansi"] }
 tar                = { version = "0.4.46" }
 text-block-macros  = { version = "0.2.0" }
+textwrap           = { version = "0.16.2", default-features = false }
 tower              = { version = "0.5.3" }
 tower-http         = { version = "0.7.0", features = ["compression-gzip", "cors", "trace"] }
 tracing            = { version = "0.1.44" }

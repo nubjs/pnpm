@@ -1,6 +1,16 @@
-use super::{Collapsed, CollapsingHandler};
-use miette::{Diagnostic, MietteHandlerOpts, ReportHandler};
+use super::{Collapsed, CollapsingHandler, handler};
+use miette::{Diagnostic, ReportHandler};
 use std::{error::Error, fmt};
+
+/// Renders a diagnostic the way a `miette::Report` does, through the
+/// handler the CLI installs.
+struct Rendered<'a>(&'a CollapsingHandler, &'a dyn Diagnostic);
+
+impl fmt::Debug for Rendered<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.debug(self.1, formatter)
+    }
+}
 
 /// A `#[diagnostic(transparent)]` wrapper: displays as its inner error
 /// and keeps it as the source.
@@ -189,15 +199,7 @@ fn a_diagnostic_source_is_folded_like_an_error_source() {
 /// it.
 #[test]
 fn the_handler_renders_a_repeated_message_once() {
-    struct Rendered<'a>(&'a CollapsingHandler, &'a dyn Diagnostic);
-
-    impl fmt::Debug for Rendered<'_> {
-        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.debug(self.1, formatter)
-        }
-    }
-
-    let handler = CollapsingHandler { inner: MietteHandlerOpts::new().build() };
+    let handler = CollapsingHandler { inner: handler() };
     let wrapped = Wrapper { inner: Wrapper { inner: Leaf { message: "boom", source: None } } };
 
     let rendered = format!("{:?}", Rendered(&handler, &wrapped));
@@ -207,4 +209,27 @@ fn the_handler_renders_a_repeated_message_once() {
         1,
         "the message must be rendered once, got:\n{rendered}",
     );
+}
+
+/// A name too long for the line is broken at the line's edge, never at one
+/// of its own hyphens: `@scope/a-very-long-` reads as a package somebody
+/// could go and look for, while a break mid-segment cannot be mistaken for
+/// a name. The same setting is what stops a line-balancing host splitting a
+/// name that would have fitted whole; this case is the one that can be
+/// asserted without depending on which wrap algorithm was compiled in.
+#[test]
+fn a_name_too_long_for_the_line_is_never_broken_at_one_of_its_hyphens() {
+    let leaf = Leaf {
+        message: "cannot resolve @scope/a-very-long-package-name-that-runs-well-past-the-end-of-the-line-and-keeps-going from the registry",
+        source: None,
+    };
+
+    let rendered = format!("{:?}", Rendered(&CollapsingHandler { inner: handler() }, &leaf));
+
+    for line in rendered.lines() {
+        assert!(
+            !line.trim_end().ends_with('-'),
+            "a line was broken at a hyphen, so the fragment reads as a name:\n{rendered}",
+        );
+    }
 }
