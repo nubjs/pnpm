@@ -725,15 +725,6 @@ impl<'a> CreateVirtualStore<'a> {
         )
     }
 
-    /// Snapshots that did not prefetch fall through to the tokio +
-    /// download path. An optional snapshot whose fetch fails is dropped
-    /// rather than aborting the install; the returned set holds those
-    /// keys for the caller to fold into its [`crate::SkippedSnapshots`],
-    /// so downstream walkers (`build_graph`, `link_bins`, hoist) treat
-    /// the snapshot as absent. Under the hoisted linker no slot is
-    /// written and each download's CAS index is the only output, folded
-    /// into [`CasIndexes::by_pkg_id`]; the isolated linker's slot import
-    /// has already happened by the time the download future returns.
     /// Whether this install must take the host policy's answer again before
     /// it places any slot: only with a policy installed, and never under the
     /// hoisted linker, which writes no slots for a layout to place.
@@ -768,9 +759,19 @@ impl<'a> CreateVirtualStore<'a> {
         self.ctx.layout.reconsult_materialize_policy(policy);
     }
 
-    /// Download and extract the cold batch. Under `defer_links` the slots
-    /// are left for the caller to place once it has the policy's second
-    /// answer, and the captures come back rather than being consumed here.
+    /// Snapshots that did not prefetch fall through to the tokio +
+    /// download path. An optional snapshot whose fetch fails is dropped
+    /// rather than aborting the install; the returned set holds those
+    /// keys for the caller to fold into its [`crate::SkippedSnapshots`],
+    /// so downstream walkers (`build_graph`, `link_bins`, hoist) treat
+    /// the snapshot as absent. Under the hoisted linker no slot is
+    /// written and each download's CAS index is the only output, folded
+    /// into [`CasIndexes::by_pkg_id`]; the isolated linker's slot import
+    /// has already happened by the time the download future returns.
+    ///
+    /// Under `defer_links` the slots are left for the caller to place once
+    /// it has the policy's second answer, and the captures come back rather
+    /// than being consumed here.
     async fn download_cold<'c, Reporter: self::Reporter>(
         &self,
         inputs: ColdInputs<'_, 'c>,
