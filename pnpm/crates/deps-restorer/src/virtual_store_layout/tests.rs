@@ -1770,3 +1770,125 @@ fn without_a_policy_every_package_keeps_the_shared_store() {
         assert!(layout.hashed_slot_dir(&key).is_some(), "{id} must keep its canonical slot");
     }
 }
+
+/// Names its package only when asked a second time.
+///
+/// Stands in for a policy deciding by what a package CONTAINS: at plan time
+/// the store holds nothing this install is about to fetch, so the first
+/// answer is blind to exactly the packages the install is there to add.
+#[derive(Debug, Default)]
+struct KeepsOnSecondAnswer(std::sync::atomic::AtomicUsize);
+
+impl pnpm_store_dir::MaterializePolicy for KeepsOnSecondAnswer {
+    fn materialize_locally(
+        &self,
+        resolved: &[pnpm_store_dir::ResolvedPackage<'_>],
+    ) -> HashSet<String> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return HashSet::new();
+        }
+        resolved
+            .iter()
+            .filter(|package| package.id == "bar@4.5.6")
+            .map(|p| p.id.to_owned())
+            .collect()
+    }
+}
+
+/// The install takes the policy's answer again once it has extracted what it
+/// fetched, and the slot follows that second answer.
+#[test]
+fn a_second_answer_moves_a_package_the_first_left_shared() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let policy = std::sync::Arc::new(KeepsOnSecondAnswer::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+        None,
+    );
+    let bar: PackageKey = "bar@4.5.6".parse().unwrap();
+    assert!(
+        layout.slot_dir(&bar).starts_with("/tmp/store/links"),
+        "the plan-time answer named nothing, so the slot is the shared one",
+    );
+
+    layout.reconsult_materialize_policy(policy.as_ref());
+
+    assert!(
+        layout.slot_dir(&bar).starts_with("/tmp/proj/node_modules/.pnpm"),
+        "the second answer must move the slot into the project, got {:?}",
+        layout.slot_dir(&bar),
+    );
+    assert_eq!(
+        layout.hashed_slot_dir(&bar),
+        None,
+        "a package held out of the shared store has no canonical shared slot",
+    );
+    assert!(
+        layout.slot_dir(&"@scope/foo@1.2.3".parse().unwrap()).starts_with("/tmp/store/links"),
+        "a package neither answer named stays shared",
+    );
+}
+
+/// The answer is taken once, so two slot lookups for the same package cannot
+/// disagree — a second call after the first is a no-op rather than a
+/// re-decision.
+#[test]
+fn the_second_answer_is_taken_once() {
+    let (mut config, snapshots) = two_package_gvs_fixture();
+    let policy = std::sync::Arc::new(KeepsOnSecondAnswer::default());
+    config.materialize_policy = Some(
+        std::sync::Arc::clone(&policy) as std::sync::Arc<dyn pnpm_store_dir::MaterializePolicy>
+    );
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+        None,
+    );
+    let bar: PackageKey = "bar@4.5.6".parse().unwrap();
+
+    layout.reconsult_materialize_policy(policy.as_ref());
+    let after_first = layout.slot_dir(&bar);
+    layout.reconsult_materialize_policy(policy.as_ref());
+
+    assert_eq!(after_first, layout.slot_dir(&bar));
+    assert_eq!(
+        policy.0.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the policy must be asked exactly twice: once at plan time, once after the fetch",
+    );
+}
+
+/// pnpm sets no policy, so there is no second answer to take and the
+/// re-consultation is inert. The control for the whole deferral path.
+#[test]
+fn without_a_policy_there_is_no_second_answer() {
+    let (config, snapshots) = two_package_gvs_fixture();
+    let layout = VirtualStoreLayout::new(
+        &config,
+        Some("darwin-arm64-node20"),
+        Some(&snapshots),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert!(!layout.defers_materialize_policy());
+    layout.reconsult_materialize_policy(&KeepsOnSecondAnswer::default());
+    for id in ["@scope/foo@1.2.3", "bar@4.5.6"] {
+        let key: PackageKey = id.parse().unwrap();
+        assert!(layout.slot_dir(&key).starts_with("/tmp/store/links"), "{id} must stay shared");
+    }
+}

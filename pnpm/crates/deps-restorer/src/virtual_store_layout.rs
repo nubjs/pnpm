@@ -290,7 +290,7 @@ impl VirtualStoreLayout {
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
                 local_store_dir: None,
                 locally_materialized: HashSet::new(),
-            deferred_policy: None,
+                deferred_policy: None,
             };
         }
         let mut layout = Self::global(
@@ -367,8 +367,7 @@ impl VirtualStoreLayout {
                 (key.clone(), pkg_id, dependencies, index_key)
             })
             .collect();
-        let deferred =
-            DeferredPolicy { rows, root_direct, late: std::sync::OnceLock::new() };
+        let deferred = DeferredPolicy { rows, root_direct, late: std::sync::OnceLock::new() };
         self.locally_materialized = deferred.ask(policy);
         // Unconditional once a policy is installed, because the second
         // answer can name a package this first one did not and there is no
@@ -402,7 +401,7 @@ impl VirtualStoreLayout {
         let Some(deferred) = self.deferred_policy.as_ref() else {
             return;
         };
-        let _ = deferred.late.set(deferred.ask(policy));
+        deferred.late.get_or_init(|| deferred.ask(policy));
     }
 
     /// Whether `key`'s slot belongs in the project rather than the shared
@@ -544,7 +543,7 @@ impl VirtualStoreLayout {
                 lockfile_dir: lockfile_dir.map(Path::to_path_buf),
                 local_store_dir: None,
                 locally_materialized: HashSet::new(),
-            deferred_policy: None,
+                deferred_policy: None,
             };
         };
         let mut hasher =
