@@ -415,6 +415,25 @@ impl VirtualStoreLayout {
                 .is_some_and(|late| late.contains(key))
     }
 
+    /// Whether the SECOND answer is what moved `key` into the project —
+    /// false for a key the first answer already named, and false before
+    /// [`Self::reconsult_materialize_policy`] has run.
+    ///
+    /// The caller needs this because a plan is built against the FIRST
+    /// answer and may decide, on finding a finished shared slot, that a
+    /// package needs no work at all. A key reported here is one that
+    /// decision could have been taken for, so its slot may be a path
+    /// nothing has written; see `CreateVirtualStore::materialize_plan`.
+    #[must_use]
+    pub fn moved_by_second_answer(&self, key: &PackageKey) -> bool {
+        !self.locally_materialized.contains(key)
+            && self
+                .deferred_policy
+                .as_ref()
+                .and_then(|deferred| deferred.late.get())
+                .is_some_and(|late| late.contains(key))
+    }
+
     /// [`Self::new`], with the derived suffix map cached on disk.
     ///
     /// The key is a digest of the inputs the suffixes are derived from,

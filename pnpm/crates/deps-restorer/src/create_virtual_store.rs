@@ -468,6 +468,22 @@ impl<'a> CreateVirtualStore<'a> {
             .await?;
         if reconsult {
             self.reconsult_materialize_policy().await;
+            // A plan skips a snapshot whose shared slot is already finished,
+            // and a skipped snapshot gets no link work — a decision taken
+            // against the FIRST answer. The second answer can move exactly
+            // such a package into the project, where that finished slot is
+            // not, so the link phase would then point the project's
+            // `node_modules` entry at a path nothing ever wrote. A dangling
+            // entry resolves to nothing at all, which is worse than the
+            // shared slot it would otherwise have kept, so the answer that
+            // invalidates the skip is the one that has to undo it.
+            let repaired = repair_moved_skips(
+                &plan.skipped_entries,
+                prefetched,
+                &partition.requires_build_by_snapshot,
+                self.ctx.layout,
+            );
+            partition.warm.extend(repaired);
             self.link_warm::<Reporter>(
                 wanted,
                 &partition,
@@ -1012,6 +1028,43 @@ fn enforce_cached_git_prepare_policy(
         }
     }
     Ok(())
+}
+
+/// The warm entries that restore the skips the policy's second answer
+/// invalidated: every skipped snapshot the second answer moved into the
+/// project, in the shape the warm link pass already consumes.
+///
+/// Warm rather than cold because there is nothing left to fetch — the
+/// package is in the CAS, which is how it had a finished shared slot in the
+/// first place — and the warm batch places a slot that does not exist yet,
+/// which is the only difference between this case and an ordinary one.
+///
+/// A snapshot whose prefetched CAS paths are missing is dropped rather than
+/// guessed at. That cannot happen for a key a content-deciding policy named,
+/// since naming it means reading its store row.
+fn repair_moved_skips<'a>(
+    skipped_entries: &'a [SnapshotWithCacheKey<'a>],
+    prefetched: &'a PrefetchResult,
+    requires_build_by_snapshot: &RequiresBuildBySnapshot,
+    layout: &VirtualStoreLayout,
+) -> Vec<partition::WarmEntry<'a>> {
+    skipped_entries
+        .iter()
+        .filter(|(snapshot_key, _, _)| layout.moved_by_second_answer(snapshot_key))
+        .filter_map(|(snapshot_key, snapshot, cache_key)| {
+            let cache_key = cache_key.as_deref()?;
+            let cas_paths = prefetched.cas_paths.get(cache_key)?;
+            let requires_build =
+                requires_build_by_snapshot.get(*snapshot_key).copied().unwrap_or(false);
+            Some((
+                *snapshot_key,
+                *snapshot,
+                cas_paths,
+                cache_key,
+                snapshot_needs_build_marker(snapshot_key, requires_build),
+            ))
+        })
+        .collect()
 }
 
 /// Whether the warm slot of one git-hosted snapshot may be reused. `false`
