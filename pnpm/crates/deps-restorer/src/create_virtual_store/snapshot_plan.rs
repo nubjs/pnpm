@@ -262,8 +262,26 @@ fn warm_slot_is_current<Reporter: self::Reporter>(
 /// linker writes no virtual-store slot (pnpm/pnpm#14001), and a `file:`
 /// dependency's source is mutable, so for those neither an unchanged
 /// lockfile nor an existing slot is evidence the copy is current.
+///
+/// A deferred materialize policy is the third such case, and there it is
+/// the slot's LOCATION rather than its contents that the probe cannot
+/// judge: the host is asked again once the fetch has landed, and its
+/// second answer may move a package out of the shared store and into
+/// this project. A slot found here sits where the FIRST answer put it,
+/// so it says nothing about where the install will finally point. The
+/// skip is not merely stale, it is unrecoverable -- a skipped snapshot
+/// contributes no link work at all, so the symlink phase would aim the
+/// project's `node_modules` entry at a path nothing ever wrote, which
+/// resolves to nothing rather than to the shared copy it would
+/// otherwise have kept.
+///
+/// It costs little to give up: the reconsult already links the whole
+/// warm batch after the second answer, so under a policy these slots
+/// were being relinked regardless, and the skip was saving only the
+/// prefetch and partition work for them.
 fn slot_probe_applies(probe: &WarmSlotProbe<'_, '_>, snapshot_key: &PackageKey) -> bool {
     !probe.is_hoisted
+        && !probe.layout.defers_materialize_policy()
         && !matches!(
             probe.packages.get(&snapshot_key.without_peer()).map(|meta| &meta.resolution),
             Some(LockfileResolution::Directory(_)),
