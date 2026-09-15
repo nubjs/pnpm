@@ -434,20 +434,21 @@ impl<'a> CreateVirtualStore<'a> {
         let mut indexes =
             CasIndexes::warm(links.shared_packages.as_ref(), &partition.warm, self.is_hoisted());
         // A host policy deciding from what a package CONTAINS cannot answer
-        // for one this install is about to fetch, so when this run has cold
-        // packages the fetch goes FIRST and every slot is placed after the
-        // second answer — the one ordering where both halves of the policy's
-        // input exist at once.
+        // for one whose content this install has not put in the store yet,
+        // so under a policy the fetch goes FIRST and every slot is placed
+        // after a second answer — the one ordering where both halves of the
+        // policy's input exist at once. It is not enough to do that only
+        // when something is cold: see [`Self::reconsults_materialize_policy`].
         //
         // The warm batch moves with it, and that is the part that costs: a
         // warm importer of a package the second answer keeps local has to be
         // kept local too, so linking it before that answer would point its
         // child symlink at a shared slot nothing goes on to create. So a
-        // partly-cold install pays the warm link time at the tail instead of
-        // hiding it under the downloads. Deliberate, and why nothing else
-        // takes this path: with no policy, or with nothing cold, the order
-        // below is the one pnpm always ran.
-        let reconsult = self.reconsults_materialize_policy(&partition);
+        // install under a policy pays the warm link time at the tail instead
+        // of hiding it under the downloads. Deliberate, and why nothing else
+        // takes this path: with no policy the order below is the one pnpm
+        // always ran.
+        let reconsult = self.reconsults_materialize_policy();
         if !reconsult {
             self.link_warm::<Reporter>(
                 wanted,
@@ -733,15 +734,22 @@ impl<'a> CreateVirtualStore<'a> {
     /// written and each download's CAS index is the only output, folded
     /// into [`CasIndexes::by_pkg_id`]; the isolated linker's slot import
     /// has already happened by the time the download future returns.
-    /// Whether this install must take the host policy's answer again once
-    /// the cold batch has landed: only with a policy installed, only when
-    /// this run fetches something the plan-time answer could not see, and
-    /// never under the hoisted linker, which writes no slots for a layout
-    /// to place.
-    fn reconsults_materialize_policy(&self, partition: &partition::Partition<'_>) -> bool {
-        self.ctx.layout.defers_materialize_policy()
-            && !self.is_hoisted()
-            && !partition.cold.is_empty()
+    /// Whether this install must take the host policy's answer again before
+    /// it places any slot: only with a policy installed, and never under the
+    /// hoisted linker, which writes no slots for a layout to place.
+    ///
+    /// Deliberately NOT conditioned on this run having a cold batch. A
+    /// snapshot is classified warm on the presence of its store-index row
+    /// alone ([`partition::Partitioner::warm_entry`]) and not on its slot
+    /// existing, and that row can become readable in the gap between the
+    /// plan-time policy call and the prefetch's index read. A package this
+    /// install is about to place for the FIRST time then arrives here warm,
+    /// with no slot on disk and a plan-time answer taken before its content
+    /// was in the store to scan — so gating on a non-empty cold batch left
+    /// exactly that package deciding by the blind answer, which is the race
+    /// this whole path exists to close.
+    fn reconsults_materialize_policy(&self) -> bool {
+        self.ctx.layout.defers_materialize_policy() && !self.is_hoisted()
     }
 
     /// Take the host policy's answer again, with the store now holding what
