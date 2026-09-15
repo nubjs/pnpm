@@ -1531,3 +1531,219 @@ async fn a_warm_package_with_no_slot_is_placed_by_the_second_answer() {
         "nothing may have been placed in the shared store: {global_virtual_store_dir:?}",
     );
 }
+
+/// A package the plan SKIPPED on the strength of its shared slot must still
+/// be materialized where the second answer puts it.
+///
+/// `survivors` drops a snapshot whose content-addressed shared slot already
+/// exists, and a dropped snapshot contributes no link work. That decision is
+/// taken against the PLAN-TIME answer, so when the re-consultation moves the
+/// package into the project, nothing ever writes the slot the symlink layout
+/// then points at — a dangling answer, which is worse than a wrong one:
+/// the project's `node_modules` entry resolves to nothing at all.
+///
+/// Reached in the wild by two installs sharing a store. A completes the
+/// shared slot for a package and queues its store-index row; B plans inside
+/// that window, sees the finished slot and skips, and answers "shared"
+/// because the row it would have scanned is not readable yet; A's writer
+/// flushes; B's re-consultation reads the row and moves the package local.
+/// The fixture builds that STATE directly instead of racing for it, so the
+/// test is deterministic — the two processes are how the state is reached,
+/// not what makes it a defect.
+///
+/// Read the flip carefully before concluding one process cannot produce it.
+/// It is NOT driven by a store-index row becoming readable mid-install: a
+/// skipped snapshot is never extracted, so no row would ever appear and that
+/// objection is sound. [`KeepsOnSecondAnswer`] answers differently on its
+/// second call by construction, so the flip lives in the POLICY and needs no
+/// second writer, no extraction and no timing. What the fixture has to get
+/// right instead is the precondition for a second call at all —
+/// `reconsults_materialize_policy` is `defers_materialize_policy() &&
+/// !is_hoisted()`, and the first of those needs a host policy AND the global
+/// virtual store — which is why the ask count is asserted: a run that never
+/// reconsults would otherwise pass as clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_skipped_package_the_second_answer_moves_is_still_materialized() {
+    use crate::{AllowBuildPolicy, SkippedSnapshots, VirtualStoreLayout};
+    use pnpm_config::{Config, NodeLinker, PackageImportMethod};
+    use pnpm_store_dir::StoreIndexWriter;
+    use pnpm_tarball::{CacheValue, MemCache, SharedReportedProgressKeys};
+
+    let root = tempfile::tempdir().expect("create temp dir");
+    let store_dir = root.path().join("store");
+    let global_virtual_store_dir = store_dir.join("links");
+    let package_key = key("shared-eject", "1.0.0");
+    let snapshots = HashMap::from([(package_key.clone(), SnapshotEntry::default())]);
+    let packages =
+        HashMap::from([(package_key.without_peer(), metadata_with_integrity(DUMMY_SHA512))]);
+
+    let source_dir = root.path().join("prefetched").join("shared-eject");
+    fs::create_dir_all(&source_dir).expect("create prefetched package dir");
+    let manifest_path = source_dir.join("package.json");
+    fs::write(&manifest_path, r#"{"name":"shared-eject","version":"1.0.0"}"#)
+        .expect("write package manifest");
+    let mem_cache = Arc::new(MemCache::default());
+    mem_cache.insert(
+        "https://registry.test/shared-eject/-/shared-eject-1.0.0.tgz".to_string(),
+        Arc::new(tokio::sync::RwLock::new(CacheValue::Available(Arc::new(HashMap::from([(
+            "package.json".to_string(),
+            manifest_path,
+        )]))))),
+    );
+
+    let allow_build_policy = AllowBuildPolicy::default();
+    let logged_methods = AtomicU8::new(0);
+    let progress_reported = SharedReportedProgressKeys::default();
+
+    let build = |workspace: &std::path::Path, policy: Option<Arc<KeepsOnSecondAnswer>>| {
+        let modules_dir = workspace.join("node_modules");
+        let virtual_store_dir = modules_dir.join(".pnpm");
+        let mut config = Config::new();
+        config.registry = "https://registry.test".to_string();
+        config.store_dir = store_dir.clone().into();
+        config.modules_dir = modules_dir;
+        config.virtual_store_dir = virtual_store_dir.clone();
+        config.global_virtual_store_dir = global_virtual_store_dir.clone();
+        config.enable_global_virtual_store = true;
+        config.package_import_method = PackageImportMethod::Copy;
+        config.offline = true;
+        if let Some(policy) = policy {
+            config.materialize_policy = Some(policy as Arc<dyn pnpm_store_dir::MaterializePolicy>);
+        }
+        (config.leak(), virtual_store_dir)
+    };
+
+    // FIRST INSTALL, no policy, ISOLATED: unlike the warm-by-row seed above,
+    // this one writes the shared slot as well as the row. That completed slot
+    // is the whole precondition — it is what makes `survivors` skip.
+    let seed_root = root.path().join("seed");
+    fs::create_dir_all(&seed_root).expect("create seed workspace");
+    let (seed_config, _) = build(&seed_root, None);
+    let seed_layout = VirtualStoreLayout::new(
+        seed_config,
+        None,
+        Some(&snapshots),
+        Some(&packages),
+        Some(&allow_build_policy),
+        None,
+        None,
+    );
+    let seed_skipped = SkippedSnapshots::new();
+    let (seed_writer, seed_task) = StoreIndexWriter::spawn(&seed_config.store_dir);
+    let seed_requester = seed_root.to_string_lossy().into_owned();
+    CreateVirtualStore {
+        ctx: &crate::InstallContext {
+            config: seed_config,
+            workspace_root: &seed_root,
+            requester: &seed_requester,
+            layout: &seed_layout,
+            node_linker: NodeLinker::Isolated,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        entries: LockfileEntries { packages: Some(&packages), snapshots: Some(&snapshots) },
+        current_entries: LockfileEntries::default(),
+        store_index_writer: &seed_writer,
+        store_context: None,
+        cas_prefetch: None,
+        skipped: &seed_skipped,
+        include_optional_dependencies: true,
+        supported_architectures: None,
+        dir_clone_cache: None,
+        progress_reported: &progress_reported,
+        tarball_mem_cache: Some(&mem_cache),
+        custom_fetcher_session: None,
+        planned_canonical_fetches: None,
+        link_concurrency_probe: None,
+    }
+    .run::<SilentReporter>()
+    .await
+    .expect("the seed install materializes");
+    drop(seed_writer);
+    seed_task.await.expect("join seed writer").expect("flush seed writer");
+    // Positive control on the seed: without a COMPLETE shared slot the plan
+    // has nothing to skip, and the rest of this test would pass for the wrong
+    // reason.
+    let shared_slot = seed_layout.slot_dir(&package_key);
+    assert!(
+        shared_slot.join("node_modules/shared-eject/package.json").is_file(),
+        "the seed must leave a complete shared slot, got {shared_slot:?}",
+    );
+
+    // SECOND INSTALL, fresh project, with the policy. The plan-time answer is
+    // "shared", the shared slot is complete, so the snapshot is skipped — and
+    // then the second answer moves it into the project.
+    let workspace_root = root.path().join("workspace");
+    fs::create_dir_all(&workspace_root).expect("create workspace root");
+    let policy = Arc::new(KeepsOnSecondAnswer::default());
+    let (config, virtual_store_dir) = build(&workspace_root, Some(Arc::clone(&policy)));
+    let layout = VirtualStoreLayout::new(
+        config,
+        None,
+        Some(&snapshots),
+        Some(&packages),
+        Some(&allow_build_policy),
+        None,
+        None,
+    );
+    assert_eq!(
+        layout.slot_dir(&package_key),
+        shared_slot,
+        "the plan-time answer named nothing, so the plan probes the shared slot and skips",
+    );
+    let skipped = SkippedSnapshots::new();
+    let (store_index_writer, writer_task) = StoreIndexWriter::spawn(&config.store_dir);
+    let requester = workspace_root.to_string_lossy().into_owned();
+    CreateVirtualStore {
+        ctx: &crate::InstallContext {
+            config,
+            workspace_root: &workspace_root,
+            requester: &requester,
+            layout: &layout,
+            node_linker: NodeLinker::Isolated,
+            allow_build_policy: &allow_build_policy,
+            link_options: &pnpm_cmd_shim::LinkBinsOptions::default(),
+            logged_methods: &logged_methods,
+            git_source_cache: &pnpm_git_fetcher::GitSourceCache::default(),
+        },
+        http_client: &pnpm_network::ThrottledClient::default(),
+        entries: LockfileEntries { packages: Some(&packages), snapshots: Some(&snapshots) },
+        current_entries: LockfileEntries::default(),
+        store_index_writer: &store_index_writer,
+        store_context: None,
+        cas_prefetch: None,
+        skipped: &skipped,
+        include_optional_dependencies: true,
+        supported_architectures: None,
+        dir_clone_cache: None,
+        progress_reported: &progress_reported,
+        tarball_mem_cache: Some(&mem_cache),
+        custom_fetcher_session: None,
+        planned_canonical_fetches: None,
+        link_concurrency_probe: None,
+    }
+    .run::<SilentReporter>()
+    .await
+    .expect("the skipped package materializes");
+    drop(store_index_writer);
+    writer_task.await.expect("join store-index writer").expect("flush store-index writer");
+
+    assert_eq!(
+        policy.0.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the policy must be asked again even though the plan skipped every snapshot",
+    );
+    let slot_dir = layout.slot_dir(&package_key);
+    assert!(
+        slot_dir.starts_with(&virtual_store_dir),
+        "the slot must follow the second answer into the project, got {slot_dir:?}",
+    );
+    assert!(
+        slot_dir.join("node_modules/shared-eject/package.json").is_file(),
+        "the answer moved the slot into the project, so the package must BE there: \
+         a slot_dir nothing wrote leaves the project's node_modules entry dangling",
+    );
+}
