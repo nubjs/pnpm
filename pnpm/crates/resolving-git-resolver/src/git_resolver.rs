@@ -72,7 +72,7 @@ pub struct GitFetchContext {
     pub store_dir: &'static StoreDir,
     pub store_index_writer: Option<Arc<StoreIndexWriter>>,
     /// Notified once per package a resolve-time fetch extracts into the
-    /// store. Carries [`Config::extract_observer`] so the packages a
+    /// store. Carries `Config::extract_observer` so the packages a
     /// resolution materializes are observed like an install's own.
     pub extract_observer: pnpm_store_dir::SharedExtractObserver,
     pub auth_headers: Arc<AuthHeaders>,

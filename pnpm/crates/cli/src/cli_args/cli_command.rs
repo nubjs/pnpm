@@ -142,7 +142,7 @@ pub struct CliArgs {
 
     /// Naming profile of the host running the engine. An embedding host
     /// fills this in at its entry point; the pnpm binary leaves it at
-    /// [`Embedder::PNPM`], which is pnpm's own naming.
+    /// [`pnpm_config::Embedder::PNPM`], which is pnpm's own naming.
     #[clap(skip)]
     pub embedder: pnpm_config::Embedder,
 
