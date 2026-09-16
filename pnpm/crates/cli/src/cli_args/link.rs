@@ -169,7 +169,7 @@ fn record_link_overrides(
             root_dir,
             &new_overrides
                 .iter()
-                .map(|(selector, specifier)| (selector.as_str(), specifier.as_str()))
+                .map(|(selector, specifier)| (selector.as_str(), Some(specifier.as_str())))
                 .collect::<Vec<_>>(),
         )
         .into_diagnostic()
