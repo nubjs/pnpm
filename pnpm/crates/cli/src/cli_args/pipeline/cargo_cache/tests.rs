@@ -254,25 +254,42 @@ fn snapshots_preserve_read_only_files() {
 }
 
 /// The cache key is a function of the process environment and the task's own
-/// `extra` map, and `PATH` is among the keys it keeps. So anything the engine
-/// adds to either — a directory an embedding host contributes for its shims,
-/// above all, whose name carries a pid — moves the key on every run and the
-/// cache is written but never restored. `Embedder::script_bin_dir` exists so
-/// that directory reaches a spawned script without passing through here.
+/// `extra` map: `PATH` is among the keys the filter keeps, and `extra` is
+/// chained on AFTER the process environment, so a key it carries wins.
+///
+/// That override is the hazard, and it is why `Embedder::script_bin_dir`
+/// exists. A directory an embedding host contributes for its shims carries a
+/// pid, so routing it through `extra` would move the cache key on every run:
+/// the cache would be written and never restored, with nothing anywhere to
+/// report it. `script_bin_dir` gets that directory to a spawned script without
+/// passing through here.
+///
+/// The override assertion is what gives this test teeth. It used to close by
+/// comparing two calls of the same pure function, which holds for any
+/// implementation, and its name claimed an invariant the body never reached —
+/// that nothing is ADDED to `PATH`, which a filter over `env::vars()` cannot
+/// do in the first place.
 #[test]
-fn the_cache_environment_adds_nothing_of_its_own_to_path() {
+fn extra_overrides_the_process_environment_in_the_cache_key_path_included() {
     let extra = HashMap::from([("RUSTFLAGS".to_string(), "-C debuginfo=0".to_string())]);
     let environment = super::cache_environment(&extra, &[]);
 
     assert_eq!(
         environment.get("PATH").map(String::as_str),
         env::var("PATH").ok().as_deref(),
-        "PATH in the key must be the process PATH verbatim",
+        "PATH must be kept in the key, and left alone when extra carries none",
     );
     assert_eq!(
         environment.get("RUSTFLAGS").map(String::as_str),
         Some("-C debuginfo=0"),
-        "the task's own extra environment is still hashed",
+        "the task's own extra environment is hashed too",
     );
-    assert_eq!(super::cache_environment(&extra, &[]), environment, "the key must be stable");
+
+    let shimmed = HashMap::from([("PATH".to_string(), "/nub-shims-42/bin".to_string())]);
+    assert_eq!(
+        super::cache_environment(&shimmed, &[]).get("PATH").map(String::as_str),
+        Some("/nub-shims-42/bin"),
+        "extra wins over the process PATH, so a caller must never put a per-run \
+         directory there -- which is the whole reason script_bin_dir exists",
+    );
 }
