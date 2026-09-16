@@ -3354,16 +3354,38 @@ impl Config {
         }
     }
 
-    /// The directory relative `patchedDependencies` paths resolve against.
-    ///
-    /// That is the workspace root, where `pnpm-workspace.yaml` declares them.
-    /// Settings an embedder profile supplies can declare them for a project
-    /// with no workspace, and those resolve against the project root, the
-    /// fallback `pnpm patch` already uses.
+    /// The directory `pnpm patch` resolves a patch file against: the workspace
+    /// root when there is one, else the project root.
     pub fn patches_base_dir(&self) -> &Path {
         self.workspace_dir
             .as_deref()
             .unwrap_or_else(|| self.modules_dir.parent().unwrap_or_else(|| Path::new(".")))
+    }
+
+    /// The directory a DECLARED `patchedDependencies` entry resolves against,
+    /// or `None` when nothing may declare one here.
+    ///
+    /// Deliberately narrower than [`Self::patches_base_dir`], which `pnpm
+    /// patch` uses to place a file it is about to write. Declarations come
+    /// from `pnpm-workspace.yaml`, so pnpm honours them only with a workspace
+    /// root to resolve against; a host that supplies its own settings can
+    /// declare them for a project that has no workspace.
+    ///
+    /// The gate is load-bearing rather than tidiness. `patchedDependencies`
+    /// also arrives through the env overlay (`PNPM_CONFIG_PATCHED_DEPENDENCIES`),
+    /// which is read whether or not a workspace was found — so widening this
+    /// to the project root would make that variable newly take effect outside
+    /// a workspace, resolving patches, hashing them into the lockfile and
+    /// turning a missing patch file into a hard error where the setting had
+    /// been ignored.
+    fn declared_patches_base_dir(&self) -> Option<&Path> {
+        if let Some(workspace_dir) = self.workspace_dir.as_deref() {
+            return Some(workspace_dir);
+        }
+        self.embedder
+            .workspace_settings
+            .is_some()
+            .then(|| self.modules_dir.parent().unwrap_or_else(|| Path::new(".")))
     }
 
     pub fn resolved_patched_dependencies(
@@ -3375,10 +3397,11 @@ impl Config {
             }))?;
             return Ok((!groups.is_empty()).then_some(groups));
         }
-        let Some(raw) = &self.patched_dependencies else {
+        let (Some(base_dir), Some(raw)) =
+            (self.declared_patches_base_dir(), &self.patched_dependencies)
+        else {
             return Ok(None);
         };
-        let base_dir = self.patches_base_dir();
         resolve_and_group(base_dir, raw)
     }
 
@@ -3415,10 +3438,11 @@ impl Config {
         if let Some(hashes) = self.patched_dependency_hashes_override.as_ref() {
             return Ok((!hashes.is_empty()).then(|| hashes.clone()));
         }
-        let Some(raw) = &self.patched_dependencies else {
+        let (Some(base_dir), Some(raw)) =
+            (self.declared_patches_base_dir(), &self.patched_dependencies)
+        else {
             return Ok(None);
         };
-        let base_dir = self.patches_base_dir();
         let mut hashes = IndexMap::with_capacity(raw.len());
         for (key, rel_or_abs) in raw {
             let candidate = Path::new(rel_or_abs);

@@ -364,6 +364,42 @@ fn host_patched_dependencies_resolve_without_a_workspace() {
     );
 }
 
+/// The control for the test above, and the reason the host gate exists at all.
+///
+/// pnpm honours a `patchedDependencies` declaration only against a workspace
+/// root. The setting reaches a workspace-less project anyway through the env
+/// overlay, so a project-root fallback offered to every profile would make
+/// `PNPM_CONFIG_PATCHED_DEPENDENCIES` newly take effect there — hashing the
+/// patch into the lockfile, and failing hard when the file is missing, where
+/// pnpm had ignored it. Under pnpm's own profile the answer stays `None`.
+#[test]
+fn pnpm_patched_dependencies_are_ignored_without_a_workspace() {
+    let dir = tempfile::tempdir().expect("create a temp project dir");
+    std::fs::write(dir.path().join("package.json"), r#"{"name":"app","version":"1.0.0"}"#)
+        .expect("write the manifest");
+    std::fs::create_dir(dir.path().join("patches")).expect("create the patches dir");
+    std::fs::write(dir.path().join("patches").join("left-pad.patch"), "patch body\n")
+        .expect("write the patch");
+
+    let mut config = Config::default().current::<crate::Host>(dir.path()).expect("load config");
+    assert_eq!(config.workspace_dir, None, "the fixture must have no workspace");
+    assert_eq!(config.embedder.program_name, Embedder::PNPM.program_name);
+    config.patched_dependencies = Some(
+        [("left-pad@1.3.0".to_owned(), "patches/left-pad.patch".to_owned())].into_iter().collect(),
+    );
+
+    assert_eq!(
+        config.patched_dependency_hashes().expect("ask for the hashes"),
+        None,
+        "pnpm resolves a declaration only against a workspace root",
+    );
+    assert_eq!(
+        config.resolved_patched_dependencies().expect("ask for the patch groups"),
+        None,
+        "and the group resolver must agree with the hasher",
+    );
+}
+
 /// With no pnpm configuration read there is no default pnpmfile to look for
 /// either. `None` is what sends the hook finder looking for `.pnpmfile.cjs`;
 /// an empty list runs none.
