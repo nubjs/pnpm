@@ -384,9 +384,10 @@ fn pnpm_patched_dependencies_are_ignored_without_a_workspace() {
     let mut config = Config::default().current::<crate::Host>(dir.path()).expect("load config");
     assert_eq!(config.workspace_dir, None, "the fixture must have no workspace");
     assert_eq!(config.embedder.program_name, Embedder::PNPM.program_name);
-    config.patched_dependencies = Some(
-        [("left-pad@1.3.0".to_owned(), "patches/left-pad.patch".to_owned())].into_iter().collect(),
-    );
+    config.patched_dependencies = Some(indexmap::IndexMap::from([(
+        "left-pad@1.3.0".to_owned(),
+        "patches/left-pad.patch".to_owned(),
+    )]));
 
     assert_eq!(
         config.patched_dependency_hashes().expect("ask for the hashes"),
