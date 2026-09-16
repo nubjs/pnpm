@@ -237,6 +237,13 @@ pub struct Embedder {
     /// record, and merges them into whatever it already had. Hosts whose
     /// overrides come from a file they DO read — `package.json`'s neutral
     /// `overrides`, say — want this rather than the refusal.
+    ///
+    /// The same writer REMOVES, with `None` for the specifier, and `unlink`
+    /// goes through it. That symmetry is load-bearing rather than tidiness:
+    /// while removal was gated on the workspace manifest alone, a host with a
+    /// writer could create a link it was then refused permission to undo, and
+    /// the refusal named a settings file that host keeps no overrides in, and
+    /// may not even have.
     pub overrides_writer: Option<OverridesWriter>,
 
     /// Where `patchedDependencies` lives for this host, the problem
@@ -343,8 +350,9 @@ pub struct Embedder {
 pub type AllowBuildsWriter = fn(&std::path::Path, &[(&str, bool)]) -> std::io::Result<()>;
 
 /// Records a set of overrides for a host that keeps them outside pnpm's
-/// workspace manifest. See [`Embedder::overrides_writer`].
-pub type OverridesWriter = fn(&std::path::Path, &[(&str, &str)]) -> std::io::Result<()>;
+/// workspace manifest: each selector with the specifier to record, or `None`
+/// to drop it. See [`Embedder::overrides_writer`].
+pub type OverridesWriter = fn(&std::path::Path, &[(&str, Option<&str>)]) -> std::io::Result<()>;
 
 /// Records an edit to `patchedDependencies` for a host that keeps them
 /// outside pnpm's workspace manifest: each selector with the patch file to

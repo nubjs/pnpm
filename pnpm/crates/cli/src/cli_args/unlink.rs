@@ -1,5 +1,5 @@
 use clap::Args;
-use miette::Context;
+use miette::{Context, IntoDiagnostic};
 use pnpm_config::Config;
 use pnpm_workspace_manifest_writer::remove_overrides;
 use std::path::Path;
@@ -74,7 +74,15 @@ impl UnlinkArgs {
 
         // Before the in-memory removal, so a refusal leaves the run's own
         // config consistent with what is on disk.
-        if !removed.is_empty() && !embedder.writes_settings_file {
+        // The predicate is `link`'s, deliberately. A host that can RECORD an
+        // override can remove one through the same writer, and gating removal
+        // on the workspace manifest alone left a link such a host could create
+        // and never undo -- with a refusal naming a settings file it keeps no
+        // overrides in, and may not even have.
+        if !removed.is_empty()
+            && embedder.overrides_writer.is_none()
+            && !embedder.writes_settings_file
+        {
             return Err(UnlinkOverridesNotWritable {
                 settings_file: embedder.settings_file_display_name,
                 selectors: removed.join("\n  "),
@@ -93,8 +101,17 @@ impl UnlinkArgs {
                 .or_else(|| manifest_path.parent().map(Path::to_path_buf))
                 .ok_or_else(|| miette::miette!("manifest path has no parent directory"))?;
 
-            remove_overrides(&root_dir, &removed)
-                .wrap_err("removing link: overrides from pnpm-workspace.yaml")?;
+            match embedder.overrides_writer {
+                Some(write) => {
+                    let removals: Vec<(&str, Option<&str>)> =
+                        removed.iter().map(|selector| (selector.as_str(), None)).collect();
+                    write(&root_dir, &removals)
+                        .into_diagnostic()
+                        .wrap_err("removing linked dependencies for the host")?;
+                }
+                None => remove_overrides(&root_dir, &removed)
+                    .wrap_err("removing link: overrides from pnpm-workspace.yaml")?,
+            }
         }
 
         Ok(true)
@@ -106,6 +123,23 @@ mod tests {
     use super::{UnlinkArgs, UnlinkOverridesNotWritable};
     use indexmap::IndexMap;
     use pnpm_config::Config;
+    use std::sync::Mutex;
+
+    /// What [`recording_writer`] was handed. An `OverridesWriter` is a plain
+    /// function pointer, so a closure cannot capture the assertion target.
+    static RECORDED: Mutex<Vec<(String, Option<String>)>> = Mutex::new(Vec::new());
+
+    fn recording_writer(
+        _dir: &std::path::Path,
+        entries: &[(&str, Option<&str>)],
+    ) -> std::io::Result<()> {
+        RECORDED.lock().expect("record the override edit").extend(
+            entries.iter().map(|(selector, specifier)| {
+                ((*selector).to_owned(), specifier.map(str::to_owned))
+            }),
+        );
+        Ok(())
+    }
 
     fn config_with_link_override() -> Config {
         let mut overrides = IndexMap::new();
@@ -160,6 +194,41 @@ mod tests {
         assert!(
             err.to_string().contains("nub.jsonc"),
             "the refusal names the host's settings file, got: {err}"
+        );
+    }
+
+    /// A host that can RECORD an override can remove one through the same
+    /// writer, so it must not be refused.
+    ///
+    /// The gate above used to read the workspace manifest alone, which made
+    /// the pair asymmetric: `link` accepts a host with a writer, `unlink`
+    /// refused it. Measured on a built nub before the fix -- `link` exited 0
+    /// and wrote the override to `package.json`, then `unlink` exited 1 and
+    /// told the user to edit `nub.jsonc`, which the fixture did not even have.
+    /// The link was unremovable by any nub command.
+    #[test]
+    fn a_host_with_an_overrides_writer_removes_through_it() {
+        RECORDED.lock().expect("clear the record").clear();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut config = config_with_link_override();
+        config.workspace_dir = Some(dir.path().to_path_buf());
+        config.embedder.writes_settings_file = false;
+        config.embedder.settings_file_display_name = "nub.jsonc";
+        config.embedder.overrides_writer = Some(recording_writer);
+
+        let reinstall = UnlinkArgs { package_names: Vec::new(), ignore_pnpmfile: false }
+            .strip_link_overrides(&mut config, &dir.path().join("package.json"))
+            .expect("a host with a writer can persist the removal");
+
+        assert!(reinstall, "the caller reinstalls after a successful unlink");
+        assert_eq!(
+            *RECORDED.lock().expect("read the record"),
+            vec![("sib".to_owned(), None)],
+            "the writer is handed the selector with None, which is the removal spelling",
+        );
+        assert!(
+            config.overrides.as_ref().is_none_or(|o| !o.contains_key("sib")),
+            "and the run's own config no longer carries the link",
         );
     }
 }

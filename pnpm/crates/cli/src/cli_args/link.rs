@@ -169,7 +169,7 @@ fn record_link_overrides(
             root_dir,
             &new_overrides
                 .iter()
-                .map(|(selector, specifier)| (selector.as_str(), specifier.as_str()))
+                .map(|(selector, specifier)| (selector.as_str(), Some(specifier.as_str())))
                 .collect::<Vec<_>>(),
         )
         .into_diagnostic()
@@ -267,9 +267,17 @@ mod tests {
     /// the engine then writes no workspace manifest behind its back.
     #[test]
     fn a_host_writer_takes_the_overrides_instead_of_the_workspace_manifest() {
-        fn record(dir: &std::path::Path, entries: &[(&str, &str)]) -> std::io::Result<()> {
-            let body: Vec<String> =
-                entries.iter().map(|(selector, spec)| format!("{selector}={spec}")).collect();
+        fn record(dir: &std::path::Path, entries: &[(&str, Option<&str>)]) -> std::io::Result<()> {
+            // `None` is the removal spelling `unlink` uses. Rendering it
+            // distinctly rather than skipping it keeps this writer honest if a
+            // future caller sends one through the link path.
+            let body: Vec<String> = entries
+                .iter()
+                .map(|(selector, spec)| match spec {
+                    Some(spec) => format!("{selector}={spec}"),
+                    None => format!("{selector}=<removed>"),
+                })
+                .collect();
             std::fs::write(dir.join("host-overrides"), body.join("\n"))
         }
 
