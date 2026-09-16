@@ -219,12 +219,21 @@ fn the_handler_renders_a_repeated_message_once() {
 /// asserted without depending on which wrap algorithm was compiled in.
 #[test]
 fn a_name_too_long_for_the_line_is_never_broken_at_one_of_its_hyphens() {
-    let leaf = Leaf {
-        message: "cannot resolve @scope/a-very-long-package-name-that-runs-well-past-the-end-of-the-line-and-keeps-going from the registry",
-        source: None,
-    };
+    const MESSAGE: &str = "cannot resolve @scope/a-very-long-package-name-that-runs-well-past-the-end-of-the-line-and-keeps-going from the registry";
+    // Read back out of the message rather than spelled twice, so the control
+    // below cannot drift away from the name it is supposed to be watching.
+    let name = MESSAGE.split_whitespace().nth(2).expect("the message names the package");
+    let leaf = Leaf { message: MESSAGE, source: None };
 
     let rendered = format!("{:?}", Rendered(&CollapsingHandler { inner: handler() }, &leaf));
+
+    // The assertion below is about ABSENCE, so it would pass on a render that
+    // never wrapped at all. Prove the wrap engaged on the name itself first:
+    // the name is longer than the line, so no single line may carry it whole.
+    assert!(
+        rendered.lines().count() > 1 && !rendered.lines().any(|line| line.contains(name)),
+        "the name was not wrapped, so the hyphen assertion below proves nothing:\n{rendered}",
+    );
 
     for line in rendered.lines() {
         assert!(
