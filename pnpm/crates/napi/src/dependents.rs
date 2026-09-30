@@ -173,7 +173,7 @@ fn build_trees(options: &DependentsOptions) -> napi::Result<Vec<DependentsTree>>
         &lockfile_dir,
         options.modules_dir.as_deref().map(Path::new),
         false,
-        pnpm_config::Embedder::PNPM,
+        &pnpm_config::Embedder::PNPM,
     )
     .map_err(|report| report_to_napi_error(&report))?;
     let registries = registry_routes(options);

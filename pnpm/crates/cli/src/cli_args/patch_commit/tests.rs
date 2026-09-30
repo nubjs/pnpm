@@ -237,10 +237,10 @@ fn record_in_host_file(dir: &Path, entries: &[(&str, Option<&str>)]) -> std::io:
     fs::write(dir.join("host-patched-dependencies"), lines.join("\n"))
 }
 
-fn state_in(dir: &Path, embedder: Embedder) -> State {
+fn state_in(dir: &Path, embedder: &Embedder) -> State {
     fs::write(dir.join("package.json"), "{}").expect("write package.json");
     let mut config = pnpm_config::Config::new();
-    config.embedder = embedder;
+    config.embedder = *embedder;
     config.workspace_dir = Some(dir.to_path_buf());
     let config: &'static pnpm_config::Config = Box::leak(Box::new(config));
     State {
@@ -263,7 +263,7 @@ fn state_in(dir: &Path, embedder: Embedder) -> State {
 async fn a_host_with_nowhere_to_record_the_patch_is_refused_before_anything_happens() {
     let tmp = tempdir().expect("temp dir");
     let edit_dir = tmp.path().join("edit-dir");
-    let state = state_in(tmp.path(), host_that_writes_no_settings_file());
+    let state = state_in(tmp.path(), &host_that_writes_no_settings_file());
 
     let err = PatchCommitArgs { patch_dir: edit_dir.clone(), patches_dir: None }
         .run::<SilentReporter>(tmp.path(), state)
@@ -293,7 +293,7 @@ fn a_host_writer_records_the_patch_instead_of_the_workspace_manifest() {
         patched_dependencies_writer: Some(record_in_host_file),
         ..host_that_writes_no_settings_file()
     };
-    let state = state_in(tmp.path(), embedder);
+    let state = state_in(tmp.path(), &embedder);
 
     PatchCommitArgs { patch_dir: tmp.path().join("edit-dir"), patches_dir: None }
         .record_patch(&state, tmp.path(), "ms", "2.1.3", false, "patch body\n")

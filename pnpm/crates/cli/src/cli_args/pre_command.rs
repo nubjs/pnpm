@@ -83,7 +83,7 @@ pub(crate) fn pre_command_plan(
 pub(crate) fn pre_command_plan_for_version_flag(
     argv: &[OsString],
     config_overrides: &ConfigOverrides,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> miette::Result<Option<PreCommandPlan>> {
     pre_command_plan_from_input(
         &PreCommandInput {
@@ -1263,10 +1263,10 @@ impl SwitchInput {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    fn from_version_argv(argv: &[OsString], embedder: pnpm_config::Embedder) -> Self {
+    fn from_version_argv(argv: &[OsString], embedder: &pnpm_config::Embedder) -> Self {
         let global_options = ArgTable::top_level(super::grammar());
         let mut input = Self {
-            embedder,
+            embedder: *embedder,
             dir: Self::local_prefix_or_cwd(),
             state_dir: None,
             npmrc_auth_file: None,

@@ -116,7 +116,7 @@ fn a_host_writer_takes_the_approval_instead_of_the_workspace_manifest() {
         clear_all: false,
     };
 
-    write_approval_settings(dir.path(), &decision, embedder).expect("the host writer runs");
+    write_approval_settings(dir.path(), &decision, &embedder).expect("the host writer runs");
     assert_eq!(
         std::fs::read_to_string(dir.path().join("host-approvals")).expect("the host's own file"),
         "esbuild=true\nsharp=false"
@@ -128,7 +128,7 @@ fn a_host_writer_takes_the_approval_instead_of_the_workspace_manifest() {
 
     // pnpm itself is the control: with no writer, the manifest is where the
     // decision goes.
-    write_approval_settings(dir.path(), &decision, pnpm_config::Embedder::PNPM)
+    write_approval_settings(dir.path(), &decision, &pnpm_config::Embedder::PNPM)
         .expect("pnpm's own path runs");
     let manifest = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml"))
         .expect("pnpm writes its workspace manifest");

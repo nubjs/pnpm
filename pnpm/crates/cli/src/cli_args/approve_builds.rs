@@ -90,7 +90,7 @@ impl ApproveBuildsArgs {
 
         let settings_dir =
             initial_config.workspace_dir.clone().unwrap_or_else(|| dir.to_path_buf());
-        write_approval_settings(&settings_dir, &decision, initial_config.embedder)?;
+        write_approval_settings(&settings_dir, &decision, &initial_config.embedder)?;
         clear_decided_ignored_builds(scan.modules_manifest, &scan.modules_dir, &decision)?;
 
         // Only a package that was awaiting approval has something to
@@ -191,7 +191,7 @@ fn all_denied_notice(allow_list: &str) -> String {
 pub(crate) fn write_approval_settings(
     settings_dir: &Path,
     decision: &ApprovalDecision,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> miette::Result<()> {
     let entries: Vec<(&str, bool)> =
         decision.decisions.iter().map(|(pkg, &value)| (pkg.as_str(), value)).collect();

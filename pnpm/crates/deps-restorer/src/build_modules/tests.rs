@@ -1,5 +1,5 @@
 use super::{
-    BuildModules,
+    BuildModules, BuildModulesError,
     allow_build_policy::{AllowBuildPolicy, allow_build_key_from_ignored_build},
     deferred_builds,
     slots::{is_contained_descendant, parse_name_version_from_key},

@@ -96,7 +96,7 @@ fn version_argv_reads_dir_auth_file_and_command_forms() {
 
     for case in cases {
         let argv = case.argv.iter().copied().map(OsString::from).collect::<Vec<_>>();
-        let input = SwitchInput::from_version_argv(&argv, pnpm_config::Embedder::PNPM);
+        let input = SwitchInput::from_version_argv(&argv, &pnpm_config::Embedder::PNPM);
 
         if let Some(dir) = case.dir {
             assert_eq!(input.dir, PathBuf::from(dir), "case: {}", case.name);
@@ -117,7 +117,7 @@ fn version_argv_reads_dir_auth_file_and_command_forms() {
             OsString::from("/tmp/state"),
             OsString::from("--version"),
         ],
-        pnpm_config::Embedder::PNPM,
+        &pnpm_config::Embedder::PNPM,
     );
     assert_eq!(input.state_dir.as_deref(), Some(Path::new("/tmp/state")));
 }

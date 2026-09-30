@@ -583,18 +583,24 @@ fn schedule_builds<Reporter: self::Reporter>(
     )
     .map_err(|source| BuildModulesError::ThreadPoolBuild { source })?;
     let errors = errors.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-    match collect_failed_scripts(errors) {
+    match collect_failed_scripts(errors, report_every_failed_build) {
         Some(error) => Err(error),
         None => Ok(()),
     }
 }
 
-/// The one error a build run reports. Several failed scripts fold into
-/// [`BuildModulesError::ScriptsFailed`] in dependency-path order; anything
-/// else — a single failure, or an error of another kind among them — is
-/// reported first-come, as a run that stopped at its first failure would.
-fn collect_failed_scripts(mut errors: Vec<BuildModulesError>) -> Option<BuildModulesError> {
-    if errors.len() < 2 {
+/// The one error a build run reports. Under `report_every_failed_build`,
+/// several failed scripts fold into [`BuildModulesError::ScriptsFailed`] in
+/// dependency-path order; an error of another kind among them is reported
+/// alone, first-come. Otherwise the first error is the whole report — builds
+/// already running when it happened may have failed too, and they are
+/// dropped, as a run that stops at its first failure reports.
+fn collect_failed_scripts(
+    mut errors: Vec<BuildModulesError>,
+    report_every_failed_build: bool,
+) -> Option<BuildModulesError> {
+    if !report_every_failed_build || errors.len() < 2 {
+        errors.truncate(1);
         return errors.pop();
     }
     let mut failures = Vec::with_capacity(errors.len());

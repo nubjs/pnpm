@@ -21,11 +21,11 @@ fn reads_both_lockfiles_under_the_profiles_names() {
         ..Embedder::PNPM
     };
 
-    let state = LoadedState::load(dir.path(), None, false, host).expect("load the host's state");
+    let state = LoadedState::load(dir.path(), None, false, &host).expect("load the host's state");
     assert!(state.wanted_lockfile.is_some(), "the wanted lockfile is read");
     assert!(state.current_lockfile.is_some(), "the current lockfile is read");
 
-    let pnpm = LoadedState::load(dir.path(), None, false, Embedder::PNPM).expect("load");
+    let pnpm = LoadedState::load(dir.path(), None, false, &Embedder::PNPM).expect("load");
     assert!(pnpm.wanted_lockfile.is_none(), "pnpm's profile reads pnpm-lock.yaml only");
     assert!(pnpm.current_lockfile.is_none(), "pnpm's profile reads node_modules/.pnpm only");
 }

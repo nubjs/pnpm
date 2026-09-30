@@ -678,7 +678,7 @@ async fn pins_for_downgrades<Reporter: self::Reporter + 'static>(
         lockfile_only: true,
     })
     .await?;
-    let resolved = resolved_direct_versions(install_dir, base_config.embedder);
+    let resolved = resolved_direct_versions(install_dir, &base_config.embedder);
 
     Ok(pkg
         .dependencies
@@ -697,7 +697,7 @@ async fn pins_for_downgrades<Reporter: self::Reporter + 'static>(
 /// one a plain version spec resolves to, and the only one a pin can hold.
 fn resolved_direct_versions(
     install_dir: &Path,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> HashMap<String, Version> {
     let Ok(Some(lockfile)) = Lockfile::load_wanted(install_dir, &embedder.lockfile_selection())
     else {
@@ -1098,7 +1098,7 @@ pub async fn approve_global_builds<Reporter: self::Reporter + 'static>(
         return Ok(());
     };
 
-    write_approval_settings(global_pkg_dir, &decision, base_config.embedder)?;
+    write_approval_settings(global_pkg_dir, &decision, &base_config.embedder)?;
     let mut rebuild_groups = Vec::new();
     for (install_dir, scan) in groups {
         let build_packages: Vec<String> = decision

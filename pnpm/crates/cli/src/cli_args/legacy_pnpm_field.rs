@@ -37,7 +37,7 @@ const MIGRATED_PNPM_FIELD_KEYS: &[&str] = &[
 
 /// Warn about every migrated key the root project manifest still
 /// declares under `pnpm`.
-pub(crate) fn warn_ignored_pnpm_manifest_fields(manifest: Option<&Value>, embedder: Embedder) {
+pub(crate) fn warn_ignored_pnpm_manifest_fields(manifest: Option<&Value>, embedder: &Embedder) {
     let ignored = ignored_pnpm_field_keys(manifest);
     if ignored.is_empty() {
         return;
@@ -49,7 +49,7 @@ pub(crate) fn warn_ignored_pnpm_manifest_fields(manifest: Option<&Value>, embedd
 /// none of pnpm's configuration never "stopped" reading the field, and gets no
 /// pointer to pnpm's settings page: the new home it describes is
 /// `pnpm-workspace.yaml`, which that host does not read either.
-fn ignored_field_warning(ignored: &[String], embedder: Embedder) -> String {
+fn ignored_field_warning(ignored: &[String], embedder: &Embedder) -> String {
     let keys = ignored.iter().map(|key| format!(r#""pnpm.{key}""#)).collect::<Vec<_>>().join(", ");
     let program = embedder.program_name;
     if embedder.reads_pnpm_config {

@@ -140,7 +140,7 @@ fn run_cli() -> miette::Result<()> {
         )]
         std::process::exit(exit_code);
     }
-    run_argv(argv, pnpm_config::Embedder::PNPM)
+    run_argv(argv, &pnpm_config::Embedder::PNPM)
 }
 
 /// Run the CLI in-process on a caller-supplied command line.
@@ -155,13 +155,13 @@ fn run_cli() -> miette::Result<()> {
 /// host to render under its own diagnostics. Shim dispatch is skipped,
 /// since an embedded engine is not a pnpm shim. The command runs on a
 /// dedicated large-stack thread, as it does under [`main`].
-pub fn run(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
+pub fn run(argv: Vec<OsString>, embedder: &pnpm_config::Embedder) -> miette::Result<()> {
     run_on_big_stack(move || run_argv(argv, embedder))
 }
 
 pub use host_command::{command_name, working_dir};
 
-fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Result<()> {
+fn run_argv(argv: Vec<OsString>, embedder: &pnpm_config::Embedder) -> miette::Result<()> {
     let argv_with_alias = argv_with_alias_subcommand(argv);
     let child_argv = argv_with_alias.iter().skip(1).cloned().collect::<Vec<_>>();
     // `pnpm pm <cmd>` is stripped before every other pass, so they all see
@@ -187,7 +187,7 @@ fn run_argv(argv: Vec<OsString>, embedder: pnpm_config::Embedder) -> miette::Res
         }
         Err(err) => err.exit(),
     };
-    args.embedder = embedder;
+    args.embedder = *embedder;
     configure_cli_args(&mut args)?;
     if dispatched_to_pinned_pnpm(&args, &config_overrides, &child_argv)? {
         return Ok(());
@@ -218,7 +218,7 @@ fn print_version(
     argv: &[OsString],
     child_argv: &[OsString],
     config_overrides: &ConfigOverrides,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> miette::Result<()> {
     if let Some(plan) =
         cli_args::pre_command::pre_command_plan_for_version_flag(argv, config_overrides, embedder)?
@@ -384,14 +384,14 @@ mod tests;
 /// Normalize pnpm argument syntax before passing it to clap.
 fn prepare_cli_argv(
     argv: Vec<OsString>,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> (clap::Command, Vec<OsString>) {
     let command = with_boolean_negations(CliArgs::command())
         .name(embedder.program_name)
         .bin_name(embedder.program_name);
     // `name`/`bin_name` move the usage line; the prose does not follow on its
     // own, and help never reaches the reporter a host can hook.
-    let command = with_host_names(command, &embedder);
+    let command = with_host_names(command, embedder);
     let argv = shorthands::expand_universal_shorthands(&command, argv);
     let argv = boolean_values::resolve_boolean_values(argv);
     let argv = renamed_options::drop_shadowed_aliases(&command, argv);

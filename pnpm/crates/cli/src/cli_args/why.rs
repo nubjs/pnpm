@@ -98,7 +98,7 @@ impl WhyArgs {
             &lockfile_dir,
             Some(state.config.modules_dir.as_path()),
             false,
-            state.config.embedder,
+            &state.config.embedder,
         )?;
         let Some(env) = loaded.env(
             &lockfile_dir,

@@ -45,7 +45,7 @@ impl LoadedState {
         lockfile_dir: &Path,
         modules_dir_opt: Option<&Path>,
         check_wanted_lockfile_only: bool,
-        embedder: pnpm_config::Embedder,
+        embedder: &pnpm_config::Embedder,
     ) -> miette::Result<LoadedState> {
         let modules_dir_raw = match modules_dir_opt {
             Some(dir) if dir.is_absolute() => dir.to_path_buf(),

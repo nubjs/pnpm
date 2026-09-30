@@ -906,7 +906,7 @@ fn missing_importers(selected: &HashSet<String>, lockfile_ids: &[String]) -> Vec
 fn missing_importers_error(
     missing: &[String],
     project_kind: &str,
-    embedder: Embedder,
+    embedder: &Embedder,
 ) -> miette::Report {
     let plural = if missing.len() == 1 { "" } else { "s" };
     let names = missing.join(", ");
@@ -1057,7 +1057,7 @@ fn merged_dedicated_lockfile_state(mut state: State) -> miette::Result<(State, V
         }
     }
 
-    assert_required_importers(merged.as_ref(), &required_importer_ids, state.config.embedder)?;
+    assert_required_importers(merged.as_ref(), &required_importer_ids, &state.config.embedder)?;
 
     virtual_store_dirs.sort_unstable();
     virtual_store_dirs.dedup();
@@ -1099,7 +1099,7 @@ fn rekey_importers(
 fn assert_required_importers(
     merged: Option<&Lockfile>,
     required_importer_ids: &HashSet<String>,
-    embedder: Embedder,
+    embedder: &Embedder,
 ) -> miette::Result<()> {
     let Some(lockfile) = merged else {
         return Ok(());
@@ -1154,7 +1154,7 @@ impl SbomArgs {
         )?;
         self.write_single_sbom(
             &result,
-            &self.serialize(&result, &authors, false, state.config.embedder),
+            &self.serialize(&result, &authors, false, &state.config.embedder),
         )
     }
 
@@ -1229,7 +1229,7 @@ impl SbomArgs {
         result: &SbomResult,
         authors: &[String],
         compact: bool,
-        embedder: Embedder,
+        embedder: &Embedder,
     ) -> String {
         match self.format {
             SbomFormat::CycloneDx => serialize_cyclonedx(&CycloneDxOpts {
@@ -1239,7 +1239,7 @@ impl SbomArgs {
                 authors,
                 supplier: self.supplier.as_deref(),
                 compact,
-                embedder,
+                embedder: *embedder,
             }),
             SbomFormat::Spdx => serialize_spdx(result, compact),
         }
@@ -1283,7 +1283,7 @@ impl SbomArgs {
             if result.root_name == "unknown" {
                 continue;
             }
-            let output = self.serialize(&result, authors, compact, state.config.embedder);
+            let output = self.serialize(&result, authors, compact, &state.config.embedder);
             let Some(out_template) = self.out.as_deref() else {
                 ndjson_lines.push(output);
                 continue;
@@ -1350,7 +1350,7 @@ fn select_importer_ids(
     let missing =
         if has_lockfile { missing_importers(&selected, &all_importer_ids) } else { Vec::new() };
     if !missing.is_empty() {
-        return Err(missing_importers_error(&missing, "selected", state.config.embedder));
+        return Err(missing_importers_error(&missing, "selected", &state.config.embedder));
     }
     // Intersecting rather than mapping the selection keeps the lockfile
     // order established by the caller.

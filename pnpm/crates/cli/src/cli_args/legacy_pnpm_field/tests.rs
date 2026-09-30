@@ -63,12 +63,12 @@ fn tolerates_absent_malformed_and_non_object_manifests() {
 fn the_warning_names_the_program_that_ignored_the_keys() {
     let ignored = ["overrides".to_string(), "allowBuilds".to_string()];
     assert_eq!(
-        ignored_field_warning(&ignored, Embedder::PNPM),
+        ignored_field_warning(&ignored, &Embedder::PNPM),
         r#"The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.overrides", "pnpm.allowBuilds". See https://pnpm.io/settings for the new home of each setting."#,
     );
     let host = Embedder { program_name: "host", reads_pnpm_config: false, ..Embedder::PNPM };
     assert_eq!(
-        ignored_field_warning(&ignored, host),
+        ignored_field_warning(&ignored, &host),
         r#"The "pnpm" field in package.json is not read by host. The following keys were ignored: "pnpm.overrides", "pnpm.allowBuilds"."#,
     );
 }

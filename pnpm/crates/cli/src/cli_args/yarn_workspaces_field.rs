@@ -19,7 +19,7 @@ use std::path::Path;
 /// supports it, so the advice would be wrong there and no warning is
 /// emitted.
 pub(crate) fn warn_unsupported_workspaces_field(
-    embedder: Embedder,
+    embedder: &Embedder,
     manifest: Option<&Value>,
     workspace_dir: Option<&Path>,
 ) {

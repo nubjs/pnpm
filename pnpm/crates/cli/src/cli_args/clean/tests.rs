@@ -17,7 +17,7 @@ fn removes_the_profiles_lockfile_and_its_retired_names() {
         ..Embedder::PNPM
     };
 
-    remove_workspace_lockfiles(dir.path(), dir.path(), host).expect("remove the lockfiles");
+    remove_workspace_lockfiles(dir.path(), dir.path(), &host).expect("remove the lockfiles");
 
     assert!(!dir.path().join("host.lock").exists(), "the host's lockfile is removed");
     assert!(!dir.path().join("retired.lock").exists(), "the retired lockfile is removed");

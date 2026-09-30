@@ -345,7 +345,7 @@ fn bare_result() -> SbomResult {
     }
 }
 
-fn tools_of(embedder: Embedder) -> serde_json::Value {
+fn tools_of(embedder: &Embedder) -> serde_json::Value {
     let result = bare_result();
     let document = serialize_cyclonedx(&CycloneDxOpts {
         result: &result,
@@ -354,7 +354,7 @@ fn tools_of(embedder: Embedder) -> serde_json::Value {
         authors: &[],
         supplier: None,
         compact: true,
-        embedder,
+        embedder: *embedder,
     });
     let parsed: serde_json::Value = serde_json::from_str(&document).expect("parse SBOM");
     parsed["metadata"]["tools"].clone()
@@ -366,13 +366,13 @@ fn cyclonedx_tools_credit_the_embedder() {
     const HOST: Embedder =
         Embedder { program_name: "nub", program_version: "0.0.0-test", ..Embedder::PNPM };
 
-    let components = tools_of(HOST);
+    let components = tools_of(&HOST);
     let components = components["components"].as_array().expect("tools");
     assert_eq!(components.len(), 1);
     assert_eq!(components[0]["name"], "nub");
     assert_eq!(components[0]["version"], "0.0.0-test");
 
-    let default = tools_of(Embedder::PNPM);
+    let default = tools_of(&Embedder::PNPM);
     let default = default["components"].as_array().expect("tools");
     assert_eq!(default[0]["name"], "pnpm");
     assert_eq!(default[0]["version"], pnpm_config::PNPM_VERSION);
@@ -382,15 +382,19 @@ fn cyclonedx_tools_credit_the_embedder() {
 /// the program that updates it. pnpm's wording is its own profile's.
 #[test]
 fn missing_importers_error_names_the_profiles_lockfile_and_program() {
-    let render = |embedder: Embedder| {
+    let render = |embedder: &Embedder| {
         missing_importers_error(&["packages/c".to_string()], "selected", embedder).to_string()
     };
     assert_eq!(
-        render(Embedder::PNPM),
+        render(&Embedder::PNPM),
         r#"pnpm-lock.yaml has no entry for the selected workspace project: packages/c. Run "pnpm install" to update it."#,
     );
     assert_eq!(
-        render(Embedder { program_name: "host", lockfile_basename: "host.lock", ..Embedder::PNPM }),
+        render(&Embedder {
+            program_name: "host",
+            lockfile_basename: "host.lock",
+            ..Embedder::PNPM
+        }),
         r#"host.lock has no entry for the selected workspace project: packages/c. Run "host install" to update it."#,
     );
 }

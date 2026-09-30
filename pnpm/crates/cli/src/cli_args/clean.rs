@@ -135,7 +135,7 @@ fn clean_builtin(ctx: &RunCtx<'_>, config: &Config, remove_lockfile: bool) -> mi
         }
     }
     if remove_lockfile {
-        remove_workspace_lockfiles(&cwd, root_dir, config.embedder)?;
+        remove_workspace_lockfiles(&cwd, root_dir, &config.embedder)?;
     }
     remove_external_virtual_store(&cwd, config, root_dir, modules_leaf)
 }
@@ -146,7 +146,7 @@ fn clean_builtin(ctx: &RunCtx<'_>, config: &Config, remove_lockfile: bool) -> mi
 fn remove_workspace_lockfiles(
     cwd: &Path,
     root_dir: &Path,
-    embedder: pnpm_config::Embedder,
+    embedder: &pnpm_config::Embedder,
 ) -> miette::Result<()> {
     let names = std::iter::once(embedder.lockfile_basename)
         .chain(embedder.lockfile_legacy_basenames.iter().copied());

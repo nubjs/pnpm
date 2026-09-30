@@ -115,9 +115,13 @@ fn is_windows_batch_file(path: &Path) -> bool {
 /// Whether `path` names a busybox binary — `busybox.exe`, or a release
 /// build such as `busybox64.exe` — by its file stem.
 fn is_busybox(path: &Path) -> bool {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| stem.to_ascii_lowercase().starts_with("busybox"))
+    // Split on both separators: a Windows path is selected on a Unix host too
+    // (`is_windows` is a parameter, not `cfg!`), where `Path` would treat
+    // `C:\\x\\busybox.exe` as one component.
+    let name = path.to_string_lossy();
+    let name = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let stem = name.split_once('.').map_or(name, |(stem, _)| stem);
+    stem.to_ascii_lowercase().starts_with("busybox")
 }
 
 impl SelectedShell {
