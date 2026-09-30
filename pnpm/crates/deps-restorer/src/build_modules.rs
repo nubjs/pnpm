@@ -50,6 +50,14 @@ pub enum BuildModulesError {
     #[diagnostic(transparent)]
     LifecycleScript(#[error(source)] LifecycleScriptError),
 
+    /// More than one lifecycle script failed and the host asked for all of
+    /// them (`report_every_failed_build`). Listed in dependency-path order,
+    /// so the first entry is stable across concurrent builds; it carries the
+    /// single-failure code so a host's rebranding reaches it unchanged.
+    #[display("{} dependency builds failed\n{}", failures.len(), failures.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
+    #[diagnostic(code(ERR_PNPM_EXECUTOR_LIFECYCLE_SCRIPT_FAILED))]
+    ScriptsFailed { failures: Vec<LifecycleScriptError> },
+
     #[diagnostic(transparent)]
     PatchApply(#[error(source)] PatchApplyError),
 
@@ -266,6 +274,10 @@ pub struct BuildModules<'a> {
     /// Mirrors `config.child_concurrency`. Maximum concurrent build-script
     /// spawns. Floored to `1` to guarantee forward progress.
     pub child_concurrency: u32,
+    /// Mirrors `config.embedder.report_every_failed_build`: keep building
+    /// past a failed script and report every failure, instead of stopping
+    /// at the first. Dependents of a failed build are skipped either way.
+    pub report_every_failed_build: bool,
     /// Snapshots the installability pass marked optional+incompatible.
     /// Excluded from both `requires_build` computation and the
     /// build graph. Pacquet does not run scripts (or
@@ -403,6 +415,7 @@ impl BuildModules<'_> {
                 &slot_mutations,
             ),
             self.child_concurrency,
+            self.report_every_failed_build,
         )?;
 
         // If a scheduler worker panicked while holding the
@@ -546,17 +559,15 @@ fn schedule_builds<Reporter: self::Reporter>(
     build_graph: &indexmap::IndexMap<PackageKey, Vec<PackageKey>>,
     context: &build_one_snapshot::BuildOneSnapshot<'_>,
     child_concurrency: u32,
+    report_every_failed_build: bool,
 ) -> Result<(), BuildModulesError> {
-    let first_error: Mutex<Option<BuildModulesError>> = Mutex::new(None);
+    let errors: Mutex<Vec<BuildModulesError>> = Mutex::new(Vec::new());
     let on_node_skipped: fn(&PackageKey) = |_| {};
     let run_node =
         |snapshot_key: PackageKey| match build_one_snapshot::<Reporter>(&snapshot_key, context) {
             Ok(()) => TaskCompletion::Passed,
             Err(error) => {
-                first_error
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get_or_insert(error);
+                errors.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(error);
                 TaskCompletion::Failed
             }
         };
@@ -564,16 +575,45 @@ fn schedule_builds<Reporter: self::Reporter>(
         build_graph,
         &ScheduleGraphOptions {
             concurrency: crate::script_thread_count(child_concurrency, build_graph.len()),
-            bail: true,
+            bail: !report_every_failed_build,
             continue_on_failure: false,
             run_node: &run_node,
             on_node_skipped: &on_node_skipped,
         },
     )
     .map_err(|source| BuildModulesError::ThreadPoolBuild { source })?;
-    match first_error.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
+    let errors = errors.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match collect_failed_scripts(errors) {
         Some(error) => Err(error),
         None => Ok(()),
+    }
+}
+
+/// The one error a build run reports. Several failed scripts fold into
+/// [`BuildModulesError::ScriptsFailed`] in dependency-path order; anything
+/// else — a single failure, or an error of another kind among them — is
+/// reported first-come, as a run that stopped at its first failure would.
+fn collect_failed_scripts(mut errors: Vec<BuildModulesError>) -> Option<BuildModulesError> {
+    if errors.len() < 2 {
+        return errors.pop();
+    }
+    let mut failures = Vec::with_capacity(errors.len());
+    for error in errors {
+        match error {
+            BuildModulesError::LifecycleScript(
+                failure @ LifecycleScriptError::ScriptFailed { .. },
+            ) => failures.push(failure),
+            other => return Some(other),
+        }
+    }
+    failures.sort_by(|a, b| script_dep_path(a).cmp(script_dep_path(b)));
+    Some(BuildModulesError::ScriptsFailed { failures })
+}
+
+fn script_dep_path(failure: &LifecycleScriptError) -> &str {
+    match failure {
+        LifecycleScriptError::ScriptFailed { dep_path, .. } => dep_path,
+        _ => "",
     }
 }
 

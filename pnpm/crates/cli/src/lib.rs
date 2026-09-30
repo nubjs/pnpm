@@ -96,6 +96,36 @@ pub fn dlx_child_exit_code(error: &miette::Report) -> Option<i32> {
     }
 }
 
+/// The exit status of the dependency build script behind `error`, or `None`
+/// when the failure is anything else, or the child died of a signal.
+///
+/// For a host with `Embedder::report_every_failed_build`, whose install
+/// exits with the failing script's own status the way `run` does. Several
+/// failures answer with the first listed, which is the first in
+/// dependency-path order and so stable across concurrent builds. The
+/// failure sits several wrappers below the report, so the cause chain is
+/// walked the way miette renders it.
+#[must_use]
+pub fn lifecycle_script_exit_code(error: &miette::Report) -> Option<i32> {
+    use pnpm_deps_restorer::BuildModulesError;
+    use pnpm_executor::LifecycleScriptError;
+
+    let mut level: Option<&(dyn std::error::Error + 'static)> = Some(error.as_ref());
+    while let Some(current) = level {
+        if let Some(BuildModulesError::ScriptsFailed { failures }) = current.downcast_ref() {
+            return match failures.first()? {
+                LifecycleScriptError::ScriptFailed { status, .. } => status.code(),
+                _ => None,
+            };
+        }
+        if let Some(LifecycleScriptError::ScriptFailed { status, .. }) = current.downcast_ref() {
+            return status.code();
+        }
+        level = current.source();
+    }
+    None
+}
+
 /// Parse and execute the CLI, including shim dispatch and startup fast paths.
 fn run_cli() -> miette::Result<()> {
     let argv: Vec<OsString> = std::env::args_os().collect();

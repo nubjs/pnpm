@@ -284,6 +284,7 @@ fn build_modules<'a>(
         user_agent: &config.user_agent,
         unsafe_perm: config.unsafe_perm,
         child_concurrency: config.child_concurrency,
+        report_every_failed_build: config.embedder.report_every_failed_build,
         skipped: inputs.skipped,
         pkg_roots_by_key: inputs.hoisted_pkg_roots_by_key,
         gather_ancestor_bin_paths: inputs.is_hoisted,

@@ -490,6 +490,7 @@ fn build_modules_collects_ignored_builds() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules")
@@ -555,6 +556,7 @@ fn mutated_slots_is_false_when_every_build_is_ignored() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules");
@@ -620,6 +622,7 @@ fn mutated_slots_is_true_when_a_script_runs() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules");
@@ -685,6 +688,7 @@ fn a_build_script_is_told_the_node_the_host_supplies() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules");
@@ -757,6 +761,7 @@ fn ignore_scripts_skips_build_without_collecting_ignored() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules")
@@ -820,6 +825,7 @@ fn cached_requires_build_false_skips_package_dir_probe() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules")
@@ -898,6 +904,7 @@ fn build_modules_collects_ignored_builds_under_concurrency() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules under concurrency")
@@ -973,6 +980,7 @@ fn build_modules_excludes_explicit_deny_from_ignored() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("run BuildModules")
@@ -1065,6 +1073,7 @@ fn do_not_fail_on_optional_dep_with_failing_postinstall() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<RecordingReporter>()
     .expect("optional build failure must NOT abort the install");
@@ -1235,6 +1244,7 @@ fn using_side_effects_cache_skips_rebuild() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<RecordingReporter>()
     .expect("install must succeed when the cache hit skips the rebuild");
@@ -1370,6 +1380,7 @@ fn corrupt_side_effects_cache_falls_back_to_rebuild() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("a corrupt cache overlay must degrade to a rebuild, not abort the install");
@@ -1496,6 +1507,7 @@ fn materialization_failure_on_incomplete_slot_is_fatal() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>();
 
@@ -1571,6 +1583,7 @@ fn side_effects_cache_disabled_bypasses_the_gate() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect_err("with cache disabled, the failing postinstall must run and the install must fail");
@@ -1644,6 +1657,7 @@ fn fail_when_failing_postinstall_is_required() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect_err("required build failure must propagate");
@@ -1741,6 +1755,7 @@ fn frozen_backstop_run(
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
 }
@@ -1819,6 +1834,16 @@ fn frozen_store_without_gvs_does_not_trip_backstop() {
 /// test.
 #[cfg(unix)]
 fn create_failing_postinstall_fixture(virtual_store_dir: &Path, key: &PackageKey) -> PathBuf {
+    create_failing_postinstall_fixture_with_code(virtual_store_dir, key, 1)
+}
+
+/// Like [`create_failing_postinstall_fixture`], exiting with `code` so a run
+/// that reports several failures can be checked script by script.
+fn create_failing_postinstall_fixture_with_code(
+    virtual_store_dir: &Path,
+    key: &PackageKey,
+    code: i32,
+) -> PathBuf {
     let key_str = key.without_peer().to_string();
     let name_version = key_str.strip_prefix('/').unwrap_or(&key_str);
     let at_idx = name_version.rfind('@').unwrap_or(name_version.len());
@@ -1829,7 +1854,7 @@ fn create_failing_postinstall_fixture(virtual_store_dir: &Path, key: &PackageKey
     let manifest = serde_json::json!({
         "name": pkg_name,
         "version": name_version[at_idx + 1..].to_string(),
-        "scripts": { "postinstall": "echo hello && echo world && exit 1" },
+        "scripts": { "postinstall": format!("echo hello && echo world && exit {code}") },
     });
     fs::write(pkg_dir.join("package.json"), manifest.to_string()).expect("write manifest");
     pkg_dir
@@ -2073,6 +2098,7 @@ async fn write_path_populates_side_effects_row() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("build modules must complete cleanly");
@@ -2204,6 +2230,7 @@ async fn write_path_disabled_skips_upload() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("build modules must complete cleanly");
@@ -2305,6 +2332,7 @@ async fn frozen_store_skips_side_effects_upload() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("build modules must complete cleanly");
@@ -2465,6 +2493,7 @@ async fn upload_error_does_not_interrupt_install() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("upload failure must not propagate; install continues");
@@ -2731,6 +2760,7 @@ new file mode 100644
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("build modules must complete cleanly");
@@ -2852,6 +2882,7 @@ new file mode 100644
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("build modules must complete cleanly");
@@ -2945,6 +2976,7 @@ async fn missing_patch_file_path_errors_with_diagnostic() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: None,
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect_err("missing patch_file_path must surface as PatchFilePathMissing");
@@ -3214,6 +3246,7 @@ fn rebuild_selection_runs_only_selected_scripts() {
         import_method: PackageImportMethod::Auto,
         logged_methods: &TEST_LOGGED_METHODS,
         rebuild: Some(&rebuild),
+        report_every_failed_build: false,
     }
     .run::<SilentReporter>()
     .expect("rebuild runs");
@@ -3247,4 +3280,106 @@ fn is_contained_descendant_rejects_traversal_and_escapes() {
 
     // A sibling that merely shares a name prefix is not contained.
     assert!(!is_contained_descendant(root, Path::new("/store/v11/links-evil/foo")));
+}
+
+/// Under `report_every_failed_build` a failed script does not end the run:
+/// every build that does not depend on it still runs, and the failures come
+/// back together in dependency-path order, each with its own exit status.
+/// Off, the run stops at the first failure and reports that one alone —
+/// pnpm's own behavior, which the default keeps.
+#[cfg(unix)]
+#[test]
+fn every_failed_build_is_reported_when_the_host_asks_for_all_of_them() {
+    let failing =
+        [("@pnpm.e2e/failing-b", 4), ("@pnpm.e2e/failing-a", 3), ("@pnpm.e2e/failing-c", 7)];
+    let snapshots: HashMap<PackageKey, SnapshotEntry> =
+        failing.iter().map(|(name, _)| (key(name, "1.0.0"), SnapshotEntry::default())).collect();
+    let importers = root_importers(&failing.map(|(name, _)| (name, "1.0.0")));
+    let policy = policy_from_specs([], true);
+
+    let virtual_store_dir = tempdir().expect("create temp dir");
+    let modules_dir = tempdir().expect("create temp dir");
+    let lockfile_dir = tempdir().expect("create temp dir");
+    for (name, code) in failing {
+        create_failing_postinstall_fixture_with_code(
+            virtual_store_dir.path(),
+            &key(name, "1.0.0"),
+            code,
+        );
+    }
+
+    let run = |report_every_failed_build: bool| {
+        BuildModules {
+            layout: &VirtualStoreLayout::legacy(
+                virtual_store_dir.path(),
+                pnpm_config::default_virtual_store_dir_max_length() as usize,
+            ),
+            modules_dir: modules_dir.path(),
+            lockfile_dir: lockfile_dir.path(),
+            snapshots: Some(&snapshots),
+            importers: &importers,
+            packages: None,
+            allow_build_policy: &policy,
+            side_effects_maps_by_snapshot: None,
+            requires_build_by_snapshot: None,
+            engine_name: None,
+            side_effects_cache: false,
+            side_effects_cache_write: false,
+            shared_side_effects_publisher: None,
+            store_dir: None,
+            store_index_writer: None,
+            patches: None,
+            scripts_prepend_node_path: ScriptsPrependNodePath::Never,
+            node_execpath: None,
+            script_bin_dir: None,
+            script_shell: None,
+            shell_emulator: false,
+            extra_env: &HashMap::new(),
+            user_agent: "pnpm/test",
+            unsafe_perm: true,
+            child_concurrency: 2,
+            skipped: &SkippedSnapshots::default(),
+            pkg_roots_by_key: None,
+            gather_ancestor_bin_paths: false,
+            frozen_store: false,
+            ignore_scripts: false,
+            import_method: PackageImportMethod::Auto,
+            logged_methods: &TEST_LOGGED_METHODS,
+            rebuild: None,
+            report_every_failed_build,
+        }
+        .run::<SilentReporter>()
+        .expect_err("three failing postinstalls must fail the build phase")
+    };
+
+    match run(true) {
+        BuildModulesError::ScriptsFailed { failures } => {
+            let listed: Vec<(String, Option<i32>)> = failures
+                .iter()
+                .map(|failure| match failure {
+                    pnpm_executor::LifecycleScriptError::ScriptFailed {
+                        dep_path, status, ..
+                    } => (dep_path.clone(), status.code()),
+                    other => panic!("expected a failed script, got {other}"),
+                })
+                .collect();
+            assert_eq!(
+                listed,
+                [
+                    ("@pnpm.e2e/failing-a@1.0.0".to_string(), Some(3)),
+                    ("@pnpm.e2e/failing-b@1.0.0".to_string(), Some(4)),
+                    ("@pnpm.e2e/failing-c@1.0.0".to_string(), Some(7)),
+                ],
+                "every failure, in dependency-path order, each with its own status"
+            );
+        }
+        other => panic!("expected every failure reported together, got {other}"),
+    }
+
+    match run(false) {
+        BuildModulesError::LifecycleScript(pnpm_executor::LifecycleScriptError::ScriptFailed {
+            ..
+        }) => {}
+        other => panic!("the default stops at the first failure and reports it alone, got {other}"),
+    }
 }

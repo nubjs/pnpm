@@ -289,6 +289,18 @@ pub struct Embedder {
     /// `select_shell` recognizes it by name.
     pub default_script_shell: Option<&'static std::path::Path>,
 
+    /// Whether the build phase runs every dependency build it can and reports
+    /// each failed one, rather than stopping at the first failure.
+    ///
+    /// pnpm stops: the first failed lifecycle script ends the install and is
+    /// the one reported. A host whose users fix several failing builds at
+    /// once wants the whole list from one run; with this `true`, builds that
+    /// do not depend on a failed one keep running, and more than one failure
+    /// surfaces as `ERR_PNPM_EXECUTOR_LIFECYCLE_SCRIPT_FAILED` naming every
+    /// script with its exit status. The host reads the first listed script's
+    /// status back through `lifecycle_script_exit_code` to exit with it.
+    pub report_every_failed_build: bool,
+
     /// The executable this host answers `dlx --package <spec> <command>`
     /// with, the way pnpm does.
     ///
@@ -414,6 +426,7 @@ impl Embedder {
         patched_dependencies_writer: None,
         node_execpath: None,
         default_script_shell: None,
+        report_every_failed_build: false,
         pnpm_execpath: None,
 
         script_bin_dir: None,
