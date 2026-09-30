@@ -496,7 +496,7 @@ fn run_version_lifecycle_hook<Reporter: pnpm_reporter::Reporter>(
     };
 
     let root_modules_dir = change.path.join(&config.modules_dir);
-    let script_shell = config.script_shell.as_ref().map(PathBuf::from);
+    let script_shell = config.script_shell_path().map(PathBuf::from);
     let run_opts = RunPostinstallHooks {
         dep_path: &change.name,
         pkg_root: &change.path,

@@ -1,6 +1,6 @@
 use super::{ScriptShellError, SelectedShell, select_shell};
 use pretty_assertions::assert_eq;
-use std::{ffi::OsString, path::Path};
+use std::{collections::HashMap, ffi::OsString, path::Path};
 
 fn os(text: &str) -> OsString {
     OsString::from(text)
@@ -15,6 +15,7 @@ fn posix_default_is_sh_minus_c() {
             program: Path::new("sh").to_path_buf(),
             args: vec![os("-c")],
             windows_verbatim_args: false,
+            restore_env_casing: false,
         },
     );
 }
@@ -45,6 +46,7 @@ fn custom_script_shell_wins_on_both_platforms() {
                 program: custom.to_path_buf(),
                 args: vec![os("-c")],
                 windows_verbatim_args: false,
+                restore_env_casing: false,
             },
             "is_windows={is_windows}",
         );
@@ -72,4 +74,42 @@ fn batch_file_script_shell_allowed_on_posix() {
     let path = Path::new("/tmp/weird.cmd");
     let shell = select_shell(Some(path), false).expect("must accept on POSIX");
     assert_eq!(shell.program, path);
+}
+
+#[test]
+fn busybox_script_shell_runs_its_sh_applet_and_restores_env_casing() {
+    for path in [r"C:\nub\bin\busybox.exe", r"C:\tools\BusyBox64.exe", "/opt/busybox"] {
+        let shell = select_shell(Some(Path::new(path)), true).expect("select_shell");
+        assert_eq!(shell.program, Path::new(path));
+        assert_eq!(
+            shell.args,
+            vec![os("sh"), os("-c")],
+            "{path}: busybox dispatches on argv[0] or a leading applet name, so `busybox -c` runs no shell",
+        );
+        assert!(shell.restore_env_casing, "{path}");
+        assert!(!shell.windows_verbatim_args, "{path}");
+    }
+}
+
+#[test]
+fn a_casing_restoring_shell_re_exports_the_lowercase_names_it_was_handed() {
+    let env: HashMap<String, String> = [
+        ("npm_package_name", "a"),
+        ("PATH", "x"),
+        ("npm_lifecycle_event", "postinstall"),
+        ("9lives", "no"),
+        ("with-dash", "no"),
+        ("Mixed", "yes"),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value.to_string()))
+    .collect();
+    let busybox = select_shell(Some(Path::new(r"C:\nub\busybox.exe")), true).expect("select_shell");
+    assert_eq!(
+        busybox.script_body("node build.js", &env),
+        "export Mixed=\"$MIXED\"; export npm_lifecycle_event=\"$NPM_LIFECYCLE_EVENT\"; \
+         export npm_package_name=\"$NPM_PACKAGE_NAME\"; node build.js",
+    );
+    let plain = select_shell(Some(Path::new("/bin/bash")), false).expect("select_shell");
+    assert_eq!(plain.script_body("node build.js", &env), "node build.js");
 }

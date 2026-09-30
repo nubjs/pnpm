@@ -12,7 +12,7 @@ pub use make_env::{EnvBuild, EnvOptions, VERIFY_DEPS_BEFORE_RUN_ENV, build_env};
 pub use process_tracker::{ProcessTracker, SpawnedChild, spawn_child};
 pub use run_script::{RunScript, RunScriptError, ScriptOutput, run_script};
 pub use script_exit::ScriptExit;
-pub use shell::{ScriptShellError, SelectedShell, select_shell};
+pub use shell::{ScriptShellError, SelectedShell, lowercase_env_prologue, select_shell};
 pub use shell_emulator::{EmulatedOutput, ShellEmulatorError, execute_emulated};
 
 mod bundled_node_gyp;

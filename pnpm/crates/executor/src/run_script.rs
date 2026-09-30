@@ -232,7 +232,8 @@ fn run_in_shell(
 ) -> Result<ScriptExit, RunScriptError> {
     let mut cmd = Command::new(&shell.program);
     cmd.args(&shell.args);
-    push_script_arg(&mut cmd, command, shell.windows_verbatim_args);
+    let body = shell.script_body(command, child_env);
+    push_script_arg(&mut cmd, &body, shell.windows_verbatim_args);
     cmd.current_dir(opts.pkg_root).env_clear().envs(child_env);
     let mut child = spawn_child(&mut cmd, opts.process_tracker)
         .map_err(|source| RunScriptError::Spawn { script: command.to_string(), source })?;
@@ -254,7 +255,8 @@ fn run_piped(
 ) -> Result<ScriptExit, RunScriptError> {
     let mut cmd = Command::new(&shell.program);
     cmd.args(&shell.args);
-    push_script_arg(&mut cmd, command, shell.windows_verbatim_args);
+    let body = shell.script_body(command, child_env);
+    push_script_arg(&mut cmd, &body, shell.windows_verbatim_args);
     cmd.current_dir(pkg_root)
         .env_clear()
         .envs(child_env)

@@ -277,6 +277,18 @@ pub struct Embedder {
     /// Node.js installation.
     pub node_execpath: Option<&'static std::path::Path>,
 
+    /// The shell scripts run under when the project sets no `scriptShell`,
+    /// in place of the platform default: `sh` on POSIX, `cmd.exe` on
+    /// Windows. pnpm supplies none, and a project's `scriptShell` still wins.
+    ///
+    /// A host that ships a POSIX shell of its own on Windows runs one script
+    /// body the same way on every platform, where the platform default hands
+    /// a body written for `sh` to `cmd.exe`. A busybox binary is invoked
+    /// through its `sh` applet, with the lowercase environment names it
+    /// up-cases on load re-exported at the head of the body; the executor's
+    /// `select_shell` recognizes it by name.
+    pub default_script_shell: Option<&'static std::path::Path>,
+
     /// The executable this host answers `dlx --package <spec> <command>`
     /// with, the way pnpm does.
     ///
@@ -401,6 +413,7 @@ impl Embedder {
         overrides_writer: None,
         patched_dependencies_writer: None,
         node_execpath: None,
+        default_script_shell: None,
         pnpm_execpath: None,
 
         script_bin_dir: None,

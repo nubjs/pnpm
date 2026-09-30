@@ -2925,6 +2925,17 @@ impl Config {
         self.side_effects_cache_write_setting = None;
     }
 
+    /// The shell lifecycle and package scripts run under: the project's
+    /// `scriptShell`, else the embedder's default, else `None` for the
+    /// platform default.
+    #[must_use]
+    pub fn script_shell_path(&self) -> Option<&std::path::Path> {
+        self.script_shell
+            .as_deref()
+            .map(std::path::Path::new)
+            .or(self.embedder.default_script_shell)
+    }
+
     /// Whether the install should consult the side-effects cache
     /// (`sideEffectsCacheRead = sideEffectsCache ?? sideEffectsCacheReadonly`).
     ///

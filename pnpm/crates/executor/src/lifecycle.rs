@@ -429,7 +429,8 @@ fn run_in_shell<Reporter: self::Reporter>(
     // Windows `cmd /d /s /c` path needs `raw_arg` rather than `arg`
     // (see [`push_script_arg`]) — a branch the method chain can't
     // express.
-    push_script_arg(&mut cmd, script, shell.windows_verbatim_args);
+    let body = shell.script_body(script, env);
+    push_script_arg(&mut cmd, &body, shell.windows_verbatim_args);
     cmd.current_dir(opts.pkg_root)
         // Stripping inherited env so leftover npm_* keys from a wrapping
         // invocation cannot leak in. `build_env` already folded the

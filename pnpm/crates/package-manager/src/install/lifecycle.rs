@@ -295,7 +295,7 @@ pub(super) fn run_dev_preinstall<Reporter: self::Reporter>(
         unsafe_perm: config.unsafe_perm,
         node_gyp_bin: pnpm_executor::bundled_node_gyp_bin(),
         scripts_prepend_node_path: exec_scripts_prepend_node_path(config),
-        script_shell: config.script_shell.as_deref().map(Path::new),
+        script_shell: config.script_shell_path(),
         shell_emulator: config.shell_emulator,
         optional: false,
     })
@@ -340,7 +340,7 @@ impl ProjectScriptRunner<'_> {
             unsafe_perm: self.config.unsafe_perm,
             node_gyp_bin: pnpm_executor::bundled_node_gyp_bin(),
             scripts_prepend_node_path: self.scripts_prepend_node_path,
-            script_shell: self.config.script_shell.as_deref().map(Path::new),
+            script_shell: self.config.script_shell_path(),
             shell_emulator: self.config.shell_emulator,
             optional: false,
         })

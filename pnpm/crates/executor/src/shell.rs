@@ -1,6 +1,8 @@
 use derive_more::{Display, Error};
 use miette::Diagnostic;
 use std::{
+    borrow::Cow,
+    collections::HashMap,
     env,
     ffi::OsString,
     path::{Path, PathBuf},
@@ -41,6 +43,10 @@ pub struct SelectedShell {
     /// On non-Windows platforms the field is set but ignored —
     /// keeping the struct platform-independent simplifies tests.
     pub windows_verbatim_args: bool,
+    /// Whether the script body is prefixed with [`lowercase_env_prologue`]:
+    /// busybox-w32 up-cases every environment name it loads, so a body
+    /// sees `NPM_PACKAGE_NAME` and `$npm_package_name` expands to nothing.
+    pub restore_env_casing: bool,
 }
 
 /// Pick the shell to spawn a lifecycle script under.
@@ -61,10 +67,20 @@ pub fn select_shell(
     }
 
     if let Some(p) = script_shell {
+        // busybox is a multi-call binary that dispatches on `argv[0]` or on a
+        // leading applet name, so spawned under its own name it needs `sh`
+        // before `-c`: `busybox -c <body>` runs no shell at all.
+        let busybox = is_busybox(p);
+        let mut args = Vec::new();
+        if busybox {
+            args.push(OsString::from("sh"));
+        }
+        args.push(OsString::from("-c"));
         return Ok(SelectedShell {
             program: p.to_path_buf(),
-            args: vec![OsString::from("-c")],
+            args,
             windows_verbatim_args: false,
+            restore_env_casing: busybox,
         });
     }
 
@@ -76,6 +92,7 @@ pub fn select_shell(
             program: comspec,
             args: vec![OsString::from("/d"), OsString::from("/s"), OsString::from("/c")],
             windows_verbatim_args: true,
+            restore_env_casing: false,
         });
     }
 
@@ -83,6 +100,7 @@ pub fn select_shell(
         program: PathBuf::from("sh"),
         args: vec![OsString::from("-c")],
         windows_verbatim_args: false,
+        restore_env_casing: false,
     })
 }
 
@@ -92,6 +110,68 @@ pub fn select_shell(
 fn is_windows_batch_file(path: &Path) -> bool {
     let lowered = path.to_string_lossy().to_ascii_lowercase();
     lowered.ends_with(".cmd") || lowered.ends_with(".bat")
+}
+
+/// Whether `path` names a busybox binary — `busybox.exe`, or a release
+/// build such as `busybox64.exe` — by its file stem.
+fn is_busybox(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.to_ascii_lowercase().starts_with("busybox"))
+}
+
+impl SelectedShell {
+    /// The body to hand this shell for `script`, given the environment the
+    /// child is spawned with: `script` itself, or under a casing-restoring
+    /// shell the [`lowercase_env_prologue`] for `env` followed by `script`.
+    #[must_use]
+    pub fn script_body<'s>(&self, script: &'s str, env: &HashMap<String, String>) -> Cow<'s, str> {
+        if self.restore_env_casing {
+            let prologue = lowercase_env_prologue(env.keys().map(String::as_str));
+            Cow::Owned(format!("{prologue}{script}"))
+        } else {
+            Cow::Borrowed(script)
+        }
+    }
+}
+
+/// An `export` prologue re-binding, at the head of a script body, every
+/// lowercase name among `names`.
+///
+/// busybox-w32's shell up-cases every name when it loads the Windows
+/// environment, so a body sees `NPM_PACKAGE_NAME` and `$npm_package_name`
+/// expands to nothing, while npm, pnpm, yarn and bun all deliver the
+/// lowercase name. Upstream considers the up-casing correct and declined a
+/// preserve-casing patch (rmyorston/busybox-w32#125), so the spawner
+/// restores it. busybox's own lookup is case-sensitive, so one prologue
+/// makes `$npm_package_name` expand, puts the lowercase name back in the
+/// environment every child inherits, and shows it to `Object.keys`.
+///
+/// Names are re-bound, never values, so nothing is quoted and a value
+/// carrying quotes or newlines cannot break the body. A name with no
+/// lowercase letter is unaffected by the up-casing, and one that is not a
+/// shell identifier cannot be exported, so both are skipped.
+#[must_use]
+pub fn lowercase_env_prologue<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let mut names: Vec<&str> = names
+        .into_iter()
+        .filter(|name| {
+            name.contains(|c: char| c.is_ascii_lowercase())
+                && !name.starts_with(|c: char| c.is_ascii_digit())
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut prologue = String::new();
+    for name in names {
+        prologue.push_str("export ");
+        prologue.push_str(name);
+        prologue.push_str("=\"$");
+        prologue.push_str(&name.to_ascii_uppercase());
+        prologue.push_str("\"; ");
+    }
+    prologue
 }
 
 #[cfg(test)]
